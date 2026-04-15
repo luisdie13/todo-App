@@ -1,13 +1,5 @@
-const jwt = require('jsonwebtoken');
 const Usuario = require('../models/usuario.model');
-
-const generarToken = (usuario) => {
-  return jwt.sign(
-    { id: usuario._id, email: usuario.email, rol: usuario.rol },
-    process.env.JWT_SECRET,
-    { expiresIn: '15m' }
-  );
-};
+const tokenService = require('./tokenService');
 
 const registro = async (email, password) => {
   const usuarioExistente = await Usuario.findOne({ email });
@@ -19,9 +11,14 @@ const registro = async (email, password) => {
   const usuario = new Usuario({ email, password });
   await usuario.save();
 
-  const token = generarToken(usuario);
-  
-  return { usuario: usuario.toJSON(), token };
+  const accessToken = tokenService.generateAccessToken(usuario);
+  const { token: refreshToken } = tokenService.generateRefreshToken(usuario);
+
+  return { 
+    usuario: usuario.toJSON(), 
+    accessToken,
+    refreshToken
+  };
 };
 
 const login = async (email, password) => {
@@ -37,13 +34,17 @@ const login = async (email, password) => {
     throw new Error('Credenciales inválidas');
   }
 
-  const token = generarToken(usuario);
+  const accessToken = tokenService.generateAccessToken(usuario);
+  const { token: refreshToken } = tokenService.generateRefreshToken(usuario);
 
-  return { usuario: usuario.toJSON(), token };
+  return { 
+    usuario: usuario.toJSON(), 
+    accessToken,
+    refreshToken
+  };
 };
 
 module.exports = {
-  generarToken,
   registro,
   login
 };

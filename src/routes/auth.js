@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authService = require('../services/auth.service');
+const tokenService = require('../services/tokenService');
 
 // POST /api/auth/registro
 router.post('/registro', async (req, res) => {
@@ -38,6 +39,40 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error('Error en login:', err);
     return res.status(401).json({ error: 'Credenciales inválidas' });
+  }
+});
+
+// POST /api/auth/refresh
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token requerido' });
+    }
+
+    const tokens = tokenService.refreshAccessToken(refreshToken);
+    return res.status(200).json(tokens);
+  } catch (err) {
+    console.error('Error al refrescar token:', err);
+    return res.status(401).json({ error: 'Invalid or revoked refresh token' });
+  }
+});
+
+// POST /api/auth/logout
+router.post('/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token requerido' });
+    }
+
+    tokenService.revokeRefreshToken(refreshToken);
+    return res.status(200).json({ message: 'Logged out successfully' });
+  } catch (err) {
+    console.error('Error en logout:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
