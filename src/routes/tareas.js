@@ -1,37 +1,63 @@
 const express = require('express');
 const router = express.Router();
 const Tarea = require('../models/tarea.model');
+const autenticarToken = require('../middleware/autenticacion');
 
-// POST /api/tareas
+// Aplicar autenticación a todas las rutas
+router.use(autenticarToken);
+
+// POST /api/tareas - Crear tarea
 router.post('/', async (req, res) => {
   try {
     const { title, completed } = req.body;
-    const tarea = new Tarea({ title, completed });
+
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      return res.status(400).json({ error: 'Title es requerido' });
+    }
+
+    const tarea = new Tarea({
+      title: title.trim(),
+      completed: completed || false,
+      usuarioId: req.usuario.id
+    });
+
     await tarea.save();
     return res.status(201).json(tarea);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('Error al crear tarea:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
-// GET /api/tareas
+// GET /api/tareas - Obtener tareas del usuario
 router.get('/', async (req, res) => {
   try {
-    const tareas = await Tarea.find().lean();
+    const tareas = await Tarea.find({ usuarioId: req.usuario.id }).lean();
     return res.json(tareas);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('Error al obtener tareas:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
-// GET /api/tareas/:id
+// GET /api/tareas/:id - Obtener una tarea
 router.get('/:id', async (req, res) => {
   try {
     const tarea = await Tarea.findById(req.params.id).lean();
-    if (!tarea) return res.status(404).json({ error: 'Not found' });
+
+    if (!tarea) {
+      return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+
+    // Validar que el usuario sea propietario
+    if (tarea.usuarioId.toString() !== req.usuario.id) {
+      return res.status(403).json({ error: 'No tienes permiso para acceder a esta tarea' });
+    }
+
     return res.json(tarea);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('Error al obtener tarea:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
@@ -39,34 +65,53 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { title, completed } = req.body;
-    const tarea = await Tarea.findByIdAndUpdate(
-      req.params.id,
-      { title, completed },
-      { new: true, runValidators: true }
-    );
-    
+
+    const tarea = await Tarea.findById(req.params.id);
+
     if (!tarea) {
-      return res.status(404).json({ error: 'Not found' });
+      return res.status(404).json({ error: 'Tarea no encontrada' });
     }
-    
+
+    // Validar que el usuario sea propietario
+    if (tarea.usuarioId.toString() !== req.usuario.id) {
+      return res.status(403).json({ error: 'No tienes permiso para actualizar esta tarea' });
+    }
+
+    if (title) {
+      tarea.title = title.trim();
+    }
+
+    if (completed !== undefined) {
+      tarea.completed = completed;
+    }
+
+    await tarea.save();
     return res.json(tarea);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('Error al actualizar tarea:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
 // DELETE /api/tareas/:id - Eliminar tarea
 router.delete('/:id', async (req, res) => {
   try {
-    const tarea = await Tarea.findByIdAndDelete(req.params.id);
-    
+    const tarea = await Tarea.findById(req.params.id);
+
     if (!tarea) {
-      return res.status(404).json({ error: 'Not found' });
+      return res.status(404).json({ error: 'Tarea no encontrada' });
     }
-    
-    return res.status(204).send(); // 204 No Content
+
+    // Validar que el usuario sea propietario
+    if (tarea.usuarioId.toString() !== req.usuario.id) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
+    }
+
+    await Tarea.findByIdAndDelete(req.params.id);
+    return res.status(204).send();
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('Error al eliminar tarea:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
