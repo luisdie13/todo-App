@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const authService = require('../services/auth.service');
 const tokenService = require('../services/tokenService');
+const validate = require('../middleware/validate');
+const { registerSchema, loginSchema } = require('../validators/auth.validator');
 
 // POST /api/auth/registro
-router.post('/registro', async (req, res) => {
+router.post('/registro', validate(registerSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -26,7 +28,7 @@ router.post('/registro', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', validate(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 

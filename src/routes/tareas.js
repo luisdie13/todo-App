@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const Tarea = require('../models/tarea.model');
 const autenticarToken = require('../middleware/autenticacion');
+const validate = require('../middleware/validate');
+const { createTareaSchema, updateTareaSchema } = require('../validators/tarea.validator');
 
 // Aplicar autenticación a todas las rutas
 router.use(autenticarToken);
 
 // POST /api/tareas - Crear tarea
-router.post('/', async (req, res) => {
+router.post('/', validate(createTareaSchema), async (req, res) => {
   try {
     const { title, completed } = req.body;
 
@@ -62,7 +64,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/tareas/:id - Actualizar tarea
-router.put('/:id', async (req, res) => {
+router.put('/:id', validate(updateTareaSchema), async (req, res) => {
   try {
     const { title, completed } = req.body;
 

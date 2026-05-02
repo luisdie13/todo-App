@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 
 const tareasRouter = require('./routes/tareas');
 const authRouter = require('./routes/auth');
+const errorHandler = require('./middleware/errorHandler');
 const app = express();
 
 // Middlewares de seguridad - Capa 1: Headers de seguridad
@@ -38,5 +39,8 @@ app.use(express.json({ limit: '10kb' }));
 app.get('/', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRouter);
 app.use('/api/tareas', tareasRouter);
+
+// Middleware de manejo de errores centralizado (debe ser el último)
+app.use(errorHandler);
 
 module.exports = app;
