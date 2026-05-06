@@ -4,9 +4,10 @@ const authService = require('../services/auth.service');
 const tokenService = require('../services/tokenService');
 const validate = require('../middleware/validate');
 const { registerSchema, loginSchema } = require('../validators/auth.validator');
+const { rateLimitLogin, rateLimitRegister } = require('../security/rateLimiter');
 
 // POST /api/auth/registro
-router.post('/registro', validate(registerSchema), async (req, res) => {
+router.post('/registro', rateLimitRegister, validate(registerSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -28,7 +29,7 @@ router.post('/registro', validate(registerSchema), async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', validate(loginSchema), async (req, res) => {
+router.post('/login', rateLimitLogin, validate(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
