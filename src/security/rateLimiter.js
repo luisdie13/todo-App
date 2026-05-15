@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const auditLogService = require('../services/auditLog.service');
 
 /**
  * Rate limiter para el endpoint de LOGIN
@@ -15,8 +16,16 @@ const rateLimitLogin = rateLimit({
     const email = req.body?.email || '';
     return `${ip}-${email}`;
   },
-  handler: (req, res) => {
+  handler: async (req, res) => {
     const retryAfter = Math.ceil(req.rateLimit.resetTime / 1000);
+    
+    // Registrar evento de rate limiting
+    await auditLogService.log('security.rate_limited', req, {
+      email: req.body?.email,
+      statusCode: 429,
+      detalles: 'Demasiados intentos de login'
+    });
+    
     res.set('Retry-After', retryAfter);
     res.status(429).json({
       error: 'Demasiados intentos de login. Por favor, intenta de nuevo más tarde.',

@@ -15,7 +15,7 @@ router.post('/registro', rateLimitRegister, validate(registerSchema), async (req
       return res.status(400).json({ error: 'Email y password requeridos' });
     }
 
-    const resultado = await authService.registro(email, password);
+    const resultado = await authService.registro(email, password, req);
     return res.status(201).json(resultado);
   } catch (err) {
     console.error('Error en registro:', err);
@@ -37,7 +37,7 @@ router.post('/login', rateLimitLogin, validate(loginSchema), async (req, res) =>
       return res.status(400).json({ error: 'Email y password requeridos' });
     }
 
-    const resultado = await authService.login(email, password);
+    const resultado = await authService.login(email, password, req);
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('Error en login:', err);

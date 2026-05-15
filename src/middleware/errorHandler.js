@@ -1,8 +1,10 @@
+const auditLogService = require('../services/auditLog.service');
+
 /**
  * Middleware centralizado para manejo de errores
  * Registra los errores en el servidor y responde genéricamente al cliente
  */
-const errorHandler = (err, req, res, next) => {
+const errorHandler = async (err, req, res, next) => {
   // Registrar el error en el servidor (console.error o logger)
   console.error('Error:', {
     message: err.message,
@@ -28,6 +30,14 @@ const errorHandler = (err, req, res, next) => {
   // Errores genéricos - no revelar stack trace al cliente
   const statusCode = err.statusCode || 500;
   const isProduction = process.env.NODE_ENV === 'production';
+
+  // Registrar errores 403 (Unauthorized) como eventos de seguridad
+  if (statusCode === 403) {
+    await auditLogService.log('security.unauthorized', req, {
+      statusCode: 403,
+      detalles: err.message
+    });
+  }
 
   return res.status(statusCode).json({
     error: 'Internal Server Error',
