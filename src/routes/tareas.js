@@ -4,6 +4,7 @@ const Tarea = require('../models/tarea.model');
 const autenticarToken = require('../middleware/autenticacion');
 const validate = require('../middleware/validate');
 const { createTareaSchema, updateTareaSchema } = require('../validators/tarea.validator');
+const { checkReadPermission, checkEditPermission, checkCreatePermission } = require('../middleware/checkPermission');
 
 // Aplicar autenticación a todas las rutas
 router.use(autenticarToken);
@@ -43,20 +44,9 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/tareas/:id - Obtener una tarea
-router.get('/:id', async (req, res) => {
+router.get('/:id', checkReadPermission, async (req, res) => {
   try {
-    const tarea = await Tarea.findById(req.params.id).lean();
-
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
-    }
-
-    // Validar que el usuario sea propietario
-    if (tarea.usuarioId.toString() !== req.usuario.id) {
-      return res.status(403).json({ error: 'No tienes permiso para acceder a esta tarea' });
-    }
-
-    return res.json(tarea);
+    return res.json(req.tarea);
   } catch (err) {
     console.error('Error al obtener tarea:', err);
     return res.status(500).json({ error: 'Error interno del servidor' });
@@ -64,20 +54,11 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/tareas/:id - Actualizar tarea
-router.put('/:id', validate(updateTareaSchema), async (req, res) => {
+router.put('/:id', validate(updateTareaSchema), checkEditPermission, async (req, res) => {
   try {
     const { title, completed } = req.body;
 
-    const tarea = await Tarea.findById(req.params.id);
-
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
-    }
-
-    // Validar que el usuario sea propietario
-    if (tarea.usuarioId.toString() !== req.usuario.id) {
-      return res.status(403).json({ error: 'No tienes permiso para actualizar esta tarea' });
-    }
+    const tarea = req.tarea;
 
     if (title) {
       tarea.title = title.trim();
