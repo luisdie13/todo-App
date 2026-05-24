@@ -15,7 +15,11 @@ const auditLogSchema = new mongoose.Schema({
       'auth.login.failure',
       'auth.logout',
       'security.unauthorized',
-      'security.rate_limited'
+      'security.rate_limited',
+      'task.created',
+      'task.updated',
+      'task.deleted',
+      'task.unauthorized_access'
     ],
     required: true,
     index: true

@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const tareasRouter = require('./routes/tareas');
 const authRouter = require('./routes/auth');
 const organizationsRouter = require('./routes/organizations');
+const projectsRouter = require('./routes/projects');
 const errorHandler = require('./middleware/errorHandler');
 const app = express();
 
@@ -40,6 +41,7 @@ app.use(express.json({ limit: '10kb' }));
 app.get('/', (req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRouter);
 app.use('/api/organizations', organizationsRouter);
+app.use('/api/projects', projectsRouter);
 app.use('/api/tareas', tareasRouter);
 
 // Middleware de manejo de errores centralizado (debe ser el último)

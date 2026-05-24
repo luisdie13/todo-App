@@ -27,7 +27,11 @@ const log = async (evento, req, options = {}) => {
       'auth.login.failure',
       'auth.logout',
       'security.unauthorized',
-      'security.rate_limited'
+      'security.rate_limited',
+      'task.created',
+      'task.updated',
+      'task.deleted',
+      'task.unauthorized_access'
     ];
 
     if (!eventosValidos.includes(evento)) {
@@ -140,8 +144,54 @@ const obtenerPorEmail = async (email, limit = 10) => {
   }
 };
 
+/**
+ * Registra eventos específicos de tareas
+ * Similar a log() pero con campos específicos para tareas
+ * 
+ * @param {string} evento - Tipo de evento (task.created, task.updated, etc.)
+ * @param {Object} req - Objeto request de Express
+ * @param {Object} options - Opciones adicionales con datos de la tarea
+ * @returns {Promise<Object|null>} - El documento creado o null si hay error
+ */
+const logTaskEvent = async (evento, req, options = {}) => {
+  try {
+    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const userAgent = req.get('user-agent') || 'unknown';
+    const userId = req.usuario?.id || null;
+    
+    // Construir detalles con información de la tarea
+    const { taskId, projectId, taskTitle, action, reason } = options;
+    
+    let detalles = `Evento: ${evento}`;
+    if (taskId) detalles += ` | Task ID: ${taskId}`;
+    if (projectId) detalles += ` | Project ID: ${projectId}`;
+    if (taskTitle) detalles += ` | Title: ${taskTitle}`;
+    if (action) detalles += ` | Action: ${action}`;
+    if (reason) detalles += ` | Reason: ${reason}`;
+
+    // Registrar el evento en base de datos
+    const auditLog = await AuditLog.registrarEvento(
+      evento,
+      ip,
+      userAgent,
+      null, // email (no siempre disponible en operaciones de tarea)
+      detalles,
+      null, // statusCode (se puede pasar en options si es necesario)
+      userId
+    );
+
+    console.log(`[AUDIT TASK] ${evento} | User: ${userId} | IP: ${ip} | ${detalles}`);
+
+    return auditLog;
+  } catch (err) {
+    console.error('Error al registrar evento de tarea:', err.message);
+    return null;
+  }
+};
+
 module.exports = {
   log,
+  logTaskEvent,
   obtenerUltimos,
   obtenerPorEvento,
   obtenerPorIP,
