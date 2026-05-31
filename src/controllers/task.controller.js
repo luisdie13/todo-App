@@ -54,30 +54,42 @@ const getProjectTasks = async (req, res, next) => {
 const createProjectTask = async (req, res, next) => {
   try {
     const { projectId } = req.params;
-    const { title, description } = req.body;
-    const userId = req.usuario.id;
+    const { title, description, sensitive = false } = req.body;
+    const userId = req.user.id;
 
     // Validar entrada
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return res.status(400).json({ error: 'El título es requerido' });
     }
 
-    // Verificar permisos
-    const canCreate = await canCreateTask(req.usuario, projectId);
-    if (!canCreate) {
-      // Registrar intento no autorizado
+    // Verificar que el proyecto existe
+    const Project = require('../models/project.model');
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Proyecto no encontrado' });
+    }
+
+    // Verificar que el usuario tiene acceso al proyecto
+    const Organization = require('../models/organization.model');
+    const organization = await Organization.findById(project.organizationId);
+    const isProjectCreator = project.creador.toString() === userId;
+    const isOrgCreator = organization.creador.toString() === userId;
+    const isOrgMember = organization.miembros.some(m => m.usuario.toString() === userId);
+    
+    if (!isProjectCreator && !isOrgCreator && !isOrgMember) {
       await auditLogService.logTaskEvent('task.unauthorized_access', req, {
         projectId,
         action: 'CREATE',
-        reason: 'Usuario no tiene permiso para crear tareas'
+        reason: 'Usuario no tiene acceso al proyecto'
       });
-      return res.status(403).json({ error: 'No tienes permiso para crear tareas en este proyecto' });
+      return res.status(403).json({ error: 'No tienes acceso a este proyecto' });
     }
 
     // Crear tarea
     const tarea = new Tarea({
       title: title.trim(),
       description: description ? description.trim() : null,
+      sensitive: sensitive === true,
       usuarioId: userId,
       projectId
     });
@@ -89,7 +101,8 @@ const createProjectTask = async (req, res, next) => {
     await auditLogService.logTaskEvent('task.created', req, {
       taskId: tarea._id,
       projectId,
-      taskTitle: tarea.title
+      taskTitle: tarea.title,
+      sensitive: tarea.sensitive
     });
 
     return res.status(201).json({

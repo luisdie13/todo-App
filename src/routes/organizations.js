@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const organizationController = require('../controllers/organization.controller');
+const projectController = require('../controllers/project.controller');
 const { authentication } = require('../middleware/authentication');
 const validate = require('../middleware/validate');
 const { createOrgSchema, updateOrgSchema, inviteSchema } = require('../validators/organization.validator');
@@ -28,5 +29,13 @@ router.post('/:id/invite', validate(inviteSchema), organizationController.invite
 
 // DELETE /api/organizations/:id/members/:memberId - Remover miembro
 router.delete('/:id/members/:memberId', organizationController.removeMember);
+
+// PROYECTOS DE ORGANIZACIÓN
+
+// POST /api/organizations/:organizationId/projects - Crear proyecto
+router.post('/:organizationId/projects', projectController.createProject);
+
+// GET /api/organizations/:organizationId/projects - Obtener proyectos de la organización
+router.get('/:organizationId/projects', projectController.getOrganizationProjects);
 
 module.exports = router;
