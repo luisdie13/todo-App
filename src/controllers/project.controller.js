@@ -243,10 +243,116 @@ const deleteProject = async (req, res, next) => {
   }
 };
 
+/**
+ * PUT /api/projects/:projectId/archive
+ * Archiva un proyecto (solo lectura a partir de entonces)
+ */
+const archiveProject = async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.id;
+    const { ABACContext, abacEngine } = require('../policies/abac.policy');
+
+    // Obtener proyecto
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Proyecto no encontrado' });
+    }
+
+    // Crear contexto ABAC
+    const context = new ABACContext({
+      usuario: req.user,
+      recurso: 'project',
+      accion: 'archive',
+      proyecto: project
+    });
+
+    // Evaluar política
+    const permitido = await abacEngine.evaluate(context);
+
+    if (!permitido) {
+      await auditLogService.logTaskEvent('access.denied', req, {
+        recurso: 'project',
+        accion: 'archive',
+        projectId,
+        reason: 'Usuario no tiene permiso para archivar este proyecto'
+      });
+      return res.status(403).json({ error: 'No tienes permiso para archivar este proyecto' });
+    }
+
+    // Archivar proyecto
+    project.estado = 'archivado';
+    await project.save();
+    await project.populate('creador', 'email');
+
+    // Registrar en auditoría
+    await auditLogService.logTaskEvent('project.archived', req, {
+      projectId,
+      projectName: project.name
+    });
+
+    return res.status(200).json({
+      mensaje: 'Proyecto archivado exitosamente',
+      project
+    });
+
+  } catch (err) {
+    console.error('Error al archivar proyecto:', err.message);
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/projects/:projectId/unarchive
+ * Desarchiva un proyecto
+ */
+const unarchiveProject = async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.id;
+
+    // Obtener proyecto
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Proyecto no encontrado' });
+    }
+
+    // Verificar permisos (creador o super_admin)
+    const isSuperAdmin = req.user.rol === 'super_admin';
+    const isCreator = project.creador.toString() === userId;
+
+    if (!isCreator && !isSuperAdmin) {
+      return res.status(403).json({ error: 'No tienes permiso para desarchivar este proyecto' });
+    }
+
+    // Desarchivar proyecto
+    project.estado = 'activo';
+    await project.save();
+    await project.populate('creador', 'email');
+
+    // Registrar en auditoría
+    await auditLogService.logTaskEvent('project.unarchived', req, {
+      projectId,
+      projectName: project.name
+    });
+
+    return res.status(200).json({
+      mensaje: 'Proyecto desarchivado exitosamente',
+      project
+    });
+
+  } catch (err) {
+    console.error('Error al desarchivar proyecto:', err.message);
+    next(err);
+  }
+};
+
 module.exports = {
   createProject,
   getOrganizationProjects,
   getProject,
   updateProject,
-  deleteProject
+  deleteProject,
+  archiveProject,
+  unarchiveProject
 };

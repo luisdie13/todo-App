@@ -33,6 +33,12 @@ const tareaSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  assignee: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Usuario',
+    default: null,
+    index: true
+  },
   projectId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Organization',

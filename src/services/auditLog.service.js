@@ -31,7 +31,16 @@ const log = async (evento, req, options = {}) => {
       'task.created',
       'task.updated',
       'task.deleted',
-      'task.unauthorized_access'
+      'task.marked_done',
+      'task.unauthorized_access',
+      'project.created',
+      'project.updated',
+      'project.deleted',
+      'project.archived',
+      'project.unarchived',
+      'access.denied',
+      'audit.logs_viewed',
+      'audit.stats_viewed'
     ];
 
     if (!eventosValidos.includes(evento)) {

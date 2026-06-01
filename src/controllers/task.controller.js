@@ -54,8 +54,8 @@ const getProjectTasks = async (req, res, next) => {
 const createProjectTask = async (req, res, next) => {
   try {
     const { projectId } = req.params;
-    const { title, description, sensitive = false } = req.body;
-    const userId = req.user.id;
+    const { title, description, sensitive = false, assignee = null } = req.body;
+    const userId = req.usuario.id;
 
     // Validar entrada
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
@@ -91,18 +91,20 @@ const createProjectTask = async (req, res, next) => {
       description: description ? description.trim() : null,
       sensitive: sensitive === true,
       usuarioId: userId,
+      assignee: assignee || null,
       projectId
     });
 
     await tarea.save();
-    await tarea.populate('usuarioId', 'email');
+    await tarea.populate(['usuarioId', 'assignee'], 'email');
 
     // Registrar en auditoría
     await auditLogService.logTaskEvent('task.created', req, {
       taskId: tarea._id,
       projectId,
       taskTitle: tarea.title,
-      sensitive: tarea.sensitive
+      sensitive: tarea.sensitive,
+      assignee: assignee
     });
 
     return res.status(201).json({
@@ -269,10 +271,87 @@ const deleteProjectTask = async (req, res, next) => {
   }
 };
 
+/**
+ * PUT /api/projects/:projectId/tasks/:taskId/mark-done
+ * Marca una tarea como completada (respeta ABAC)
+ */
+const markTaskDone = async (req, res, next) => {
+  try {
+    const { projectId, taskId } = req.params;
+    const userId = req.usuario.id;
+    const { ABACContext, abacEngine } = require('../policies/abac.policy');
+    const Project = require('../models/project.model');
+
+    // Obtener tarea
+    const tarea = await Tarea.findOne({
+      _id: taskId,
+      projectId
+    }).populate('usuarioId assignee', 'email');
+
+    if (!tarea) {
+      return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+
+    // Obtener proyecto
+    const proyecto = await Project.findById(projectId);
+    if (!proyecto) {
+      return res.status(404).json({ error: 'Proyecto no encontrado' });
+    }
+
+    // Crear contexto ABAC
+    const context = new ABACContext({
+      usuario: req.usuario,
+      recurso: 'task',
+      accion: 'mark_done',
+      proyecto,
+      recursoId: taskId,
+      recursoObj: tarea
+    });
+
+    // Evaluar política
+    const permitido = await abacEngine.evaluate(context);
+
+    if (!permitido) {
+      await auditLogService.logTaskEvent('access.denied', req, {
+        recurso: 'task',
+        accion: 'mark_done',
+        projectId,
+        taskId,
+        reason: 'Usuario no tiene permiso para marcar esta tarea como completada'
+      });
+      return res.status(403).json({
+        error: 'No tienes permiso para marcar esta tarea como completada'
+      });
+    }
+
+    // Marcar como done
+    tarea.completed = true;
+    await tarea.save();
+    await tarea.populate(['usuarioId', 'assignee'], 'email');
+
+    // Registrar en auditoría
+    await auditLogService.logTaskEvent('task.marked_done', req, {
+      taskId,
+      projectId,
+      taskTitle: tarea.title
+    });
+
+    return res.status(200).json({
+      mensaje: 'Tarea marcada como completada',
+      tarea
+    });
+
+  } catch (err) {
+    console.error('Error al marcar tarea como completada:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getProjectTasks,
   createProjectTask,
   getProjectTask,
   updateProjectTask,
-  deleteProjectTask
+  deleteProjectTask,
+  markTaskDone
 };
