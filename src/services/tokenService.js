@@ -1,29 +1,29 @@
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 // In-memory store para refresh tokens
 // En producción: usar Redis o base de datos
 const refreshTokenStore = new Map();
 
-const generateAccessToken = (usuario) => {
+const generateAccessToken = (user) => {
   return jwt.sign(
-    { 
-      id: usuario._id, 
-      email: usuario.email, 
-      rol: usuario.rol 
+    {
+      id: user._id,
+      email: user.email,
+      role: user.role
     },
     process.env.JWT_SECRET,
     { expiresIn: '15m' }
   );
 };
 
-const generateRefreshToken = (usuario, familyId = null) => {
-  const familyIdentifier = familyId || uuidv4();
+const generateRefreshToken = (user, familyId = null) => {
+  const familyIdentifier = familyId || crypto.randomUUID();
   
   const token = jwt.sign(
     { 
-      id: usuario._id, 
-      email: usuario.email,
+      id: user._id, 
+      email: user.email,
       familyId: familyIdentifier
     },
     process.env.JWT_REFRESH_SECRET,
@@ -31,7 +31,7 @@ const generateRefreshToken = (usuario, familyId = null) => {
   );
 
   refreshTokenStore.set(token, {
-    userId: usuario._id,
+    userId: user._id,
     familyId: familyIdentifier,
     createdAt: new Date(),
     isRevoked: false
@@ -50,24 +50,24 @@ const refreshAccessToken = (refreshToken) => {
 
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
-    // Marcar token viejo como revocado (rotación)
+    // Mark old token as revoked (rotation)
     refreshTokenStore.set(refreshToken, {
       ...tokenData,
       isRevoked: true
     });
 
-    // Buscar usuario (en una app real, obtener de BD)
-    // Por ahora, reconstruir usuario del payload del token
-    const usuario = {
+    // Get user (in a real app, fetch from DB)
+    // For now, reconstruct user from token payload
+    const user = {
       _id: decoded.id,
       email: decoded.email,
-      rol: decoded.rol || 'user'
+      role: decoded.role || 'user'
     };
 
-    // Generar nuevo par de tokens
-    const newAccessToken = generateAccessToken(usuario);
+    // Generate new pair of tokens
+    const newAccessToken = generateAccessToken(user);
     const { token: newRefreshToken, familyId } = generateRefreshToken(
-      usuario,
+      user,
       decoded.familyId
     );
 

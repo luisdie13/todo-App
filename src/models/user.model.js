@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const usuarioSchema = new mongoose.Schema({
+const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
@@ -14,10 +14,14 @@ const usuarioSchema = new mongoose.Schema({
     required: true,
     minlength: 8
   },
-  rol: {
+  role: {
     type: String,
     enum: ['user', 'admin', 'super_admin'],
     default: 'user'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
   },
   createdAt: {
     type: Date,
@@ -25,7 +29,7 @@ const usuarioSchema = new mongoose.Schema({
   }
 });
 
-usuarioSchema.pre('save', async function(next) {
+userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   
   try {
@@ -37,14 +41,14 @@ usuarioSchema.pre('save', async function(next) {
   }
 });
 
-usuarioSchema.methods.compararPassword = async function(passwordIngresada) {
-  return await bcrypt.compare(passwordIngresada, this.password);
+userSchema.methods.comparePassword = async function(passwordProvided) {
+  return await bcrypt.compare(passwordProvided, this.password);
 };
 
-usuarioSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function() {
   const obj = this.toObject();
   delete obj.password;
   return obj;
 };
 
-module.exports = mongoose.model('Usuario', usuarioSchema);
+module.exports = mongoose.model('User', userSchema);

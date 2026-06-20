@@ -14,9 +14,9 @@ const auditTaskCreate = async (req, res, next) => {
 
   res.send = async function (data) {
     try {
-      // Solo registrar si fue exitoso (status 201)
-      if (res.statusCode === 201 && req.usuario) {
-        await auditLogService.logTaskEvent('task.created', req, {
+       // Solo registrar si fue exitoso (status 201)
+       if (res.statusCode === 201 && req.user) {
+         await auditLogService.logTaskEvent('task.created', req, {
           taskId: res.locals?.taskId,
           projectId: req.body?.projectId,
           taskTitle: req.body?.title
@@ -44,7 +44,7 @@ const auditTaskUpdate = async (req, res, next) => {
   res.send = async function (data) {
     try {
       // Registrar si fue exitoso (status 200)
-      if (res.statusCode === 200 && req.usuario) {
+      if (res.statusCode === 200 && req.user) {
         await auditLogService.logTaskEvent('task.updated', req, {
           taskId: req.params.id,
           taskTitle: req.body?.title
@@ -71,7 +71,7 @@ const auditTaskDelete = async (req, res, next) => {
   res.send = async function (data) {
     try {
       // Registrar si fue exitoso (status 204 o 200)
-      if ((res.statusCode === 204 || res.statusCode === 200) && req.usuario) {
+      if ((res.statusCode === 204 || res.statusCode === 200) && req.user) {
         await auditLogService.logTaskEvent('task.deleted', req, {
           taskId: req.params.id
         });
@@ -96,7 +96,7 @@ const auditUnauthorizedTaskAccess = async (req, res, next) => {
   res.send = async function (data) {
     try {
       // Registrar si fue denegado (status 403)
-      if (res.statusCode === 403 && req.usuario) {
+      if (res.statusCode === 403 && req.user) {
         await auditLogService.logTaskEvent('task.unauthorized_access', req, {
           taskId: req.params.id,
           action: req.method,

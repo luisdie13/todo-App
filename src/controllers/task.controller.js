@@ -1,4 +1,4 @@
-const Tarea = require('../models/tarea.model');
+const Task = require('../models/task.model');
 const Organization = require('../models/organization.model');
 const Membership = require('../models/membership.model');
 const { canCreateTask } = require('../middleware/checkPermission');
@@ -6,43 +6,87 @@ const auditLogService = require('../services/auditLog.service');
 
 /**
  * GET /api/projects/:projectId/tasks
- * Obtiene todas las tareas de un proyecto
+ * Obtiene todas las tareas de un proyecto (Validando acceso vía Organización)
  */
 const getProjectTasks = async (req, res, next) => {
   try {
     const { projectId } = req.params;
-    const userId = req.usuario.id;
+    const userId = req.user.id;
 
-    // Verificar que el proyecto existe
-    const project = await Organization.findById(projectId);
+    // 1. Buscar proyecto
+    const Project = require('../models/project.model');
+    const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Verificar que el usuario es miembro del proyecto
-    const membership = await Membership.findOne({
-      userId,
-      projectId
-    });
-
-    if (!membership) {
-      return res.status(403).json({ error: 'No tienes acceso a este proyecto' });
+    // 2. Buscar organización dueña del proyecto
+    const Organization = require('../models/organization.model');
+    const organization = await Organization.findById(project.organizationId);
+    if (!organization) {
+      return res.status(404).json({ error: 'Project organization does not exist' });
     }
 
-    // Obtener todas las tareas del proyecto
-    const tareas = await Tarea.find({ projectId })
-      .populate('usuarioId', 'email')
-      .sort({ createdAt: -1 })
-      .lean();
+     // 3. Validar accesos usando la estructura comprobada de project.controller
+      // PROTECCIÓN DEFENSIVA: Asegurar que ownerId existe antes de llamar .toString()
+      const projectOwnerId = project.ownerId;
+      const orgOwnerId = organization.ownerId;
+      
+      if (!projectOwnerId || !orgOwnerId) {
+        console.error('CRITICAL ERROR: project.ownerId or organization.ownerId is undefined', {
+          projectOwnerId: projectOwnerId ? 'exists' : 'UNDEFINED',
+          orgOwnerId: orgOwnerId ? 'exists' : 'UNDEFINED'
+        });
+        return res.status(500).json({ error: 'Owner data corrupted on server' });
+      }
 
-    return res.status(200).json({
-      proyecto: projectId,
-      tareas,
-      total: tareas.length
-    });
+      const isProjectCreator = projectOwnerId.toString?.() === userId || projectOwnerId === userId;
+      const isOrgCreator = orgOwnerId.toString?.() === userId || orgOwnerId === userId;
+      
+      const isOrgMember = organization.members?.some(m => {
+        if (!m.userId) return false;
+        const idMember = m.userId?._id ? m.userId._id.toString?.() : m.userId.toString?.();
+        return idMember === userId;
+      }) || false;
+
+    // Log de control en inglés para mantener el estándar en tu consola
+    console.log(`🚀 [HIT] getProjectTasks -> User ID: ${userId} | Is Member: ${isOrgMember}`);
+
+    if (!isProjectCreator && !isOrgCreator && !isOrgMember) {
+      return res.status(403).json({ error: 'You do not have access to this project' });
+    }
+
+      // 4. Retornar las tareas con populate defensivo
+      const tasks = await Task.find({ projectId })
+        .populate('userId', 'email')
+        .populate('assignee', 'name email')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      // DEFENSA: Transformar respuesta para asegurar estructura consistente
+      const safeTasks = tasks.map(task => {
+        return {
+          _id: task._id,
+          title: task.title,
+          description: task.description,
+          sensitive: task.sensitive,
+          completed: task.completed,
+          userId: task.userId,
+          assignee: task.assignee,
+          assigneeId: task.assignee, // Para compatibilidad frontend
+          projectId: task.projectId,
+          status: task.status || 'backlog',
+          priority: task.priority || 'medium',
+          dueDate: task.dueDate || null,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt
+        };
+      });
+
+     return res.status(200).json(safeTasks);
 
   } catch (err) {
-    console.error('Error al obtener tareas del proyecto:', err);
+    console.error('Error getting project tasks:', err);
     next(err);
   }
 };
@@ -54,66 +98,99 @@ const getProjectTasks = async (req, res, next) => {
 const createProjectTask = async (req, res, next) => {
   try {
     const { projectId } = req.params;
-    const { title, description, sensitive = false, assignee = null } = req.body;
-    const userId = req.usuario.id;
+    const { title, description, sensitive = false, assigneeId = null, dueDate = null } = req.body;
+    const userId = req.user.id;
 
     // Validar entrada
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ error: 'El título es requerido' });
+      return res.status(400).json({ error: 'Title is required' });
     }
 
     // Verificar que el proyecto existe
     const Project = require('../models/project.model');
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project not found' });
     }
 
     // Verificar que el usuario tiene acceso al proyecto
     const Organization = require('../models/organization.model');
     const organization = await Organization.findById(project.organizationId);
-    const isProjectCreator = project.creador.toString() === userId;
-    const isOrgCreator = organization.creador.toString() === userId;
-    const isOrgMember = organization.miembros.some(m => m.usuario.toString() === userId);
+    
+    // PROTECCIÓN DEFENSIVA: Validar que ownerId existe antes de .toString()
+    const projOwner = project.ownerId;
+    const orgOwner = organization.ownerId;
+    
+    if (!projOwner || !orgOwner) {
+      console.error('ERROR: Missing owner IDs in createProjectTask', { projOwner, orgOwner });
+      return res.status(500).json({ error: 'Owner data corrupted' });
+    }
+    
+    const isProjectCreator = projOwner.toString?.() === userId || projOwner === userId;
+    const isOrgCreator = orgOwner.toString?.() === userId || orgOwner === userId;
+    const isOrgMember = organization.members?.some(m => {
+      if (!m.userId) return false;
+      const memberUserId = m.userId._id ? m.userId._id.toString?.() : m.userId.toString?.();
+      return memberUserId === userId;
+    }) || false;
     
     if (!isProjectCreator && !isOrgCreator && !isOrgMember) {
       await auditLogService.logTaskEvent('task.unauthorized_access', req, {
         projectId,
         action: 'CREATE',
-        reason: 'Usuario no tiene acceso al proyecto'
+        reason: 'User does not have access to project'
       });
-      return res.status(403).json({ error: 'No tienes acceso a este proyecto' });
+      return res.status(403).json({ error: 'You do not have access to this project' });
     }
 
     // Crear tarea
-    const tarea = new Tarea({
+    const task = new Task({
       title: title.trim(),
       description: description ? description.trim() : null,
       sensitive: sensitive === true,
-      usuarioId: userId,
-      assignee: assignee || null,
-      projectId
+      userId: userId,
+      assignee: assigneeId || null,
+      projectId,
+      dueDate: dueDate || null
     });
 
-    await tarea.save();
-    await tarea.populate(['usuarioId', 'assignee'], 'email');
+    await task.save();
+    await task.populate(['userId', 'assignee'], 'name email');
 
     // Registrar en auditoría
     await auditLogService.logTaskEvent('task.created', req, {
-      taskId: tarea._id,
+      taskId: task._id,
       projectId,
-      taskTitle: tarea.title,
-      sensitive: tarea.sensitive,
-      assignee: assignee
+      taskTitle: task.title,
+      sensitive: task.sensitive,
+      assigneeId: assigneeId
     });
 
+    // Transformar respuesta para asegurar estructura consistente con Frontend
+    const responseTask = {
+      _id: task._id,
+      title: task.title,
+      description: task.description,
+      sensitive: task.sensitive,
+      completed: task.completed,
+      userId: task.userId,
+      assignee: task.assignee,
+      assigneeId: task.assignee, // Para compatibilidad frontend
+      projectId: task.projectId,
+      status: task.status || 'backlog',
+      priority: task.priority || 'medium',
+      dueDate: task.dueDate || null,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt
+    };
+
     return res.status(201).json({
-      mensaje: 'Tarea creada exitosamente',
-      tarea
+      message: 'Task created successfully',
+      task: responseTask
     });
 
   } catch (err) {
-    console.error('Error al crear tarea:', err);
+    console.error('Error creating task:', err);
     next(err);
   }
 };
@@ -125,7 +202,7 @@ const createProjectTask = async (req, res, next) => {
 const getProjectTask = async (req, res, next) => {
   try {
     const { projectId, taskId } = req.params;
-    const userId = req.usuario.id;
+    const userId = req.user.id;
 
     // Verificar membresía
     const membership = await Membership.findOne({
@@ -134,23 +211,23 @@ const getProjectTask = async (req, res, next) => {
     });
 
     if (!membership) {
-      return res.status(403).json({ error: 'No tienes acceso a este proyecto' });
+      return res.status(403).json({ error: 'You do not have access to this project' });
     }
 
     // Obtener tarea
-    const tarea = await Tarea.findOne({
+    const task = await Task.findOne({
       _id: taskId,
       projectId
-    }).populate('usuarioId', 'email');
+    }).populate('userId', 'email').populate('assignee', 'name email');
 
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
     }
 
-    return res.status(200).json(tarea);
+    return res.status(200).json(task);
 
   } catch (err) {
-    console.error('Error al obtener tarea:', err);
+    console.error('Error getting task:', err);
     next(err);
   }
 };
@@ -162,22 +239,22 @@ const getProjectTask = async (req, res, next) => {
 const updateProjectTask = async (req, res, next) => {
   try {
     const { projectId, taskId } = req.params;
-    const { title, description, completed } = req.body;
-    const userId = req.usuario.id;
+    const { title, description, completed, status, priority, assigneeId, dueDate } = req.body;
+    const userId = req.user.id;
 
     // Obtener tarea
-    const tarea = await Tarea.findOne({
+    const task = await Task.findOne({
       _id: taskId,
       projectId
     });
 
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
     }
 
     // Verificar permisos (usar checkPermission)
     const { canEditTask } = require('../middleware/checkPermission');
-    const canEdit = await canEditTask(req.usuario, tarea);
+    const canEdit = await canEditTask(req.user, task);
 
     if (!canEdit) {
       // Registrar intento no autorizado
@@ -185,41 +262,57 @@ const updateProjectTask = async (req, res, next) => {
         taskId,
         projectId,
         action: 'UPDATE',
-        reason: 'Usuario no tiene permiso para editar esta tarea'
+        reason: 'User does not have permission to edit this task'
       });
-      return res.status(403).json({ error: 'No tienes permiso para editar esta tarea' });
+      return res.status(403).json({ error: 'You do not have permission to edit this task' });
     }
 
     // Actualizar campos
     if (title) {
-      tarea.title = title.trim();
+      task.title = title.trim();
     }
 
     if (description !== undefined) {
-      tarea.description = description ? description.trim() : null;
+      task.description = description ? description.trim() : null;
     }
 
     if (completed !== undefined) {
-      tarea.completed = completed;
+      task.completed = completed;
     }
 
-    await tarea.save();
-    await tarea.populate('usuarioId', 'email');
+    if (status) {
+      task.status = status;
+    }
+
+    if (priority) {
+      task.priority = priority;
+    }
+
+    if (assigneeId !== undefined) {
+      task.assignee = assigneeId || null;
+    }
+
+    if (dueDate !== undefined) {
+      task.dueDate = dueDate || null;
+    }
+
+    await task.save();
+    await task.populate(['userId', 'assignee'], 'name email');
 
     // Registrar en auditoría
     await auditLogService.logTaskEvent('task.updated', req, {
       taskId,
       projectId,
-      taskTitle: tarea.title
+      taskTitle: task.title
     });
 
     return res.status(200).json({
-      mensaje: 'Tarea actualizada exitosamente',
-      tarea
+      message: 'Task updated successfully',
+      task
     });
 
   } catch (err) {
-    console.error('Error al actualizar tarea:', err);
+    console.error('Error updating task:', err);
     next(err);
   }
 };
@@ -227,46 +320,81 @@ const updateProjectTask = async (req, res, next) => {
 /**
  * DELETE /api/projects/:projectId/tasks/:taskId
  * Elimina una tarea del proyecto
+ * NOTA: project_admin puede eliminar CUALQUIER tarea, developer solo la suya
  */
 const deleteProjectTask = async (req, res, next) => {
   try {
     const { projectId, taskId } = req.params;
-    const userId = req.usuario.id;
+    const userId = req.user.id;
 
     // Obtener tarea
-    const tarea = await Tarea.findOne({
+    const task = await Task.findOne({
       _id: taskId,
       projectId
     });
 
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Verificar permisos
-    const { canEditTask } = require('../middleware/checkPermission');
-    const canDelete = await canEditTask(req.usuario, tarea);
+    // Obtener proyecto para validar membership
+    const Project = require('../models/project.model');
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
 
-    if (!canDelete) {
-      return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
+    // Verificar membresía y permisos
+    const membership = await Membership.findOne({
+      userId,
+      projectId
+    });
+
+    // Super admin siempre puede eliminar
+    if (req.user.role === 'super_admin') {
+      // Continuar con la eliminación
+    }
+    // project_admin puede eliminar cualquier tarea en su proyecto
+    else if (membership && membership.isAdmin()) {
+      // Continuar con la eliminación
+    }
+    // developer solo puede eliminar su propia tarea
+    else if (membership && membership.hasRole('developer')) {
+      if (task.userId.toString() !== userId) {
+        await auditLogService.logTaskEvent('task.unauthorized_deletion', req, {
+          taskId,
+          projectId,
+          reason: 'Developer can only delete their own tasks'
+        });
+        return res.status(403).json({ error: 'You can only delete your own tasks' });
+      }
+    }
+    // Sin membresía, no puede eliminar
+    else {
+      await auditLogService.logTaskEvent('task.unauthorized_deletion', req, {
+        taskId,
+        projectId,
+        reason: 'User does not have access to this project'
+      });
+      return res.status(403).json({ error: 'You do not have permission to delete this task' });
     }
 
     // Eliminar
-    await Tarea.findByIdAndDelete(taskId);
+    await Task.findByIdAndDelete(taskId);
 
     // Registrar en auditoría
     await auditLogService.logTaskEvent('task.deleted', req, {
       taskId,
       projectId,
-      taskTitle: tarea.title
+      taskTitle: task.title
     });
 
     return res.status(200).json({
-      mensaje: 'Tarea eliminada exitosamente'
+      message: 'Task deleted successfully'
     });
 
   } catch (err) {
-    console.error('Error al eliminar tarea:', err);
+    console.error('Error deleting task:', err);
     next(err);
   }
 };
@@ -278,71 +406,183 @@ const deleteProjectTask = async (req, res, next) => {
 const markTaskDone = async (req, res, next) => {
   try {
     const { projectId, taskId } = req.params;
-    const userId = req.usuario.id;
+    const userId = req.user.id;
     const { ABACContext, abacEngine } = require('../policies/abac.policy');
     const Project = require('../models/project.model');
 
     // Obtener tarea
-    const tarea = await Tarea.findOne({
+    const task = await Task.findOne({
       _id: taskId,
       projectId
-    }).populate('usuarioId assignee', 'email');
+    }).populate('userId assignee', 'name email');
 
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
     }
 
     // Obtener proyecto
-    const proyecto = await Project.findById(projectId);
-    if (!proyecto) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
     }
 
     // Crear contexto ABAC
     const context = new ABACContext({
-      usuario: req.usuario,
-      recurso: 'task',
-      accion: 'mark_done',
-      proyecto,
-      recursoId: taskId,
-      recursoObj: tarea
+      user: req.user,
+      resource: 'task',
+      action: 'mark_done',
+      project,
+      resourceId: taskId,
+      resourceObj: task
     });
 
     // Evaluar política
-    const permitido = await abacEngine.evaluate(context);
+    const allowed = await abacEngine.evaluate(context);
 
-    if (!permitido) {
+    if (!allowed) {
       await auditLogService.logTaskEvent('access.denied', req, {
-        recurso: 'task',
-        accion: 'mark_done',
+        resource: 'task',
+        action: 'mark_done',
         projectId,
         taskId,
-        reason: 'Usuario no tiene permiso para marcar esta tarea como completada'
+        reason: 'User does not have permission to mark this task as completed'
       });
       return res.status(403).json({
-        error: 'No tienes permiso para marcar esta tarea como completada'
+        error: 'You do not have permission to mark this task as completed'
       });
     }
 
     // Marcar como done
-    tarea.completed = true;
-    await tarea.save();
-    await tarea.populate(['usuarioId', 'assignee'], 'email');
+    task.completed = true;
+    await task.save();
+    await task.populate(['userId', 'assignee'], 'name email');
 
     // Registrar en auditoría
     await auditLogService.logTaskEvent('task.marked_done', req, {
       taskId,
       projectId,
-      taskTitle: tarea.title
+      taskTitle: task.title
     });
 
     return res.status(200).json({
-      mensaje: 'Tarea marcada como completada',
-      tarea
+      message: 'Task marked as completed',
+      task
     });
 
   } catch (err) {
-    console.error('Error al marcar tarea como completada:', err);
+    console.error('Error marking task as completed:', err);
+    next(err);
+  }
+};
+
+/**
+ * GET /api/tasks - Obtener tareas del usuario
+ * Método plano para obtener tareas sin especificar proyecto
+ */
+const getTasks = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Obtener todas las tareas del usuario actual
+    const tasks = await Task.find({ userId: userId })
+      .populate('userId', 'email')
+      .populate('assignee', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    return res.status(200).json(tasks);
+  } catch (err) {
+    console.error('Error getting tasks:', err);
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/tasks/:id - Actualizar tarea (ruta plana)
+ */
+const updateTask = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, description, completed, status, priority, assigneeId, dueDate } = req.body;
+    const userId = req.user.id;
+
+    // Obtener tarea
+    const task = await Task.findById(id);
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Verificar permisos (el usuario es propietario o asignado)
+    if (task.userId.toString() !== userId && task.assignee?.toString() !== userId) {
+      return res.status(403).json({ error: 'You do not have permission to edit this task' });
+    }
+
+    // Actualizar campos
+    if (title) task.title = title.trim();
+    if (description !== undefined) task.description = description ? description.trim() : null;
+    if (completed !== undefined) task.completed = completed;
+    if (status) task.status = status;
+    if (priority) task.priority = priority;
+    if (assigneeId !== undefined) task.assignee = assigneeId || null;
+    if (dueDate !== undefined) task.dueDate = dueDate || null;
+
+    await task.save();
+    await task.populate(['userId', 'assignee'], 'name email');
+
+    // Transformar respuesta para asegurar estructura consistente con Frontend
+    const responseTask = {
+      _id: task._id,
+      title: task.title,
+      description: task.description,
+      sensitive: task.sensitive,
+      completed: task.completed,
+      userId: task.userId,
+      assignee: task.assignee,
+      assigneeId: task.assignee, // Para compatibilidad frontend
+      projectId: task.projectId,
+      status: task.status || 'backlog',
+      priority: task.priority || 'medium',
+      dueDate: task.dueDate || null,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt
+    };
+
+    return res.status(200).json(responseTask);
+
+  } catch (err) {
+    console.error('Error updating task:', err);
+    next(err);
+  }
+};
+
+/**
+ * DELETE /api/tasks/:id - Eliminar tarea (ruta plana)
+ */
+const deleteTask = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Obtener tarea
+    const task = await Task.findById(id);
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Verificar permisos
+    if (task.userId.toString() !== userId) {
+      return res.status(403).json({ error: 'You do not have permission to delete this task' });
+    }
+
+    // Eliminar
+    await Task.findByIdAndDelete(id);
+
+    return res.status(200).json({ message: 'Task deleted successfully' });
+
+  } catch (err) {
+    console.error('Error deleting task:', err);
     next(err);
   }
 };
@@ -353,5 +593,8 @@ module.exports = {
   getProjectTask,
   updateProjectTask,
   deleteProjectTask,
-  markTaskDone
+  markTaskDone,
+  getTasks,
+  updateTask,
+  deleteTask
 };

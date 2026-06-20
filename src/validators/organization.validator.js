@@ -1,7 +1,7 @@
 const Joi = require('joi');
 
 const createOrgSchema = Joi.object({
-  nombre: Joi.string()
+  name: Joi.string()
     .min(3)
     .max(100)
     .required()
@@ -10,7 +10,7 @@ const createOrgSchema = Joi.object({
       'string.max': 'El nombre no puede exceder 100 caracteres',
       'any.required': 'El nombre es requerido'
     }),
-  descripcion: Joi.string()
+  description: Joi.string()
     .max(500)
     .optional()
     .messages({
@@ -19,7 +19,7 @@ const createOrgSchema = Joi.object({
 });
 
 const updateOrgSchema = Joi.object({
-  nombre: Joi.string()
+  name: Joi.string()
     .min(3)
     .max(100)
     .optional()
@@ -27,17 +27,11 @@ const updateOrgSchema = Joi.object({
       'string.min': 'El nombre debe tener al menos 3 caracteres',
       'string.max': 'El nombre no puede exceder 100 caracteres'
     }),
-  descripcion: Joi.string()
+  description: Joi.string()
     .max(500)
     .optional()
     .messages({
       'string.max': 'La descripción no puede exceder 500 caracteres'
-    }),
-  estado: Joi.string()
-    .valid('activa', 'inactiva', 'suspendida')
-    .optional()
-    .messages({
-      'any.only': 'El estado debe ser: activa, inactiva o suspendida'
     })
 });
 
@@ -49,11 +43,11 @@ const inviteSchema = Joi.object({
       'string.email': 'El email debe ser válido',
       'any.required': 'El email es requerido'
     }),
-  rol: Joi.string()
-    .valid('admin', 'miembro', 'visualizador')
-    .default('miembro')
+  role: Joi.string()
+    .valid('member', 'org_admin')
+    .default('member')
     .messages({
-      'any.only': 'El rol debe ser: admin, miembro o visualizador'
+      'any.only': 'El rol debe ser: member u org_admin'
     })
 });
 

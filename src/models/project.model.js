@@ -12,8 +12,7 @@ const projectSchema = new mongoose.Schema({
     required: true,
     trim: true,
     minlength: 3,
-    maxlength: 100,
-    index: true
+    maxlength: 100
   },
   description: {
     type: String,
@@ -32,9 +31,9 @@ const projectSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  creador: {
+  ownerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
+    ref: 'User',
     required: true,
     index: true
   },
@@ -59,7 +58,7 @@ const projectSchema = new mongoose.Schema({
  * Índices compuestos
  */
 projectSchema.index({ organizationId: 1, createdAt: -1 });
-projectSchema.index({ creador: 1, estado: 1 });
+projectSchema.index({ ownerId: 1, estado: 1 });
 
 /**
  * Pre-save middleware para actualizar updatedAt

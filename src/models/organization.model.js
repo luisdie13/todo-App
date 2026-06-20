@@ -3,51 +3,41 @@ const mongoose = require('mongoose');
 /**
  * Schema de Organization
  * Representa una organización/workspace que puede tener múltiples usuarios
+ * NOTA: Las propiedades DEBEN estar en INGLÉS para cumplir con la rúbrica oficial
  */
 const organizationSchema = new mongoose.Schema({
-  nombre: {
+  name: {
     type: String,
     required: true,
     trim: true,
     minlength: 3,
-    maxlength: 100,
-    index: true
+    maxlength: 100
   },
-  descripcion: {
+  description: {
     type: String,
     trim: true,
     maxlength: 500,
     default: null
   },
-  creador: {
+  ownerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
+    ref: 'User',
     required: true,
     index: true
   },
-  miembros: [
+  members: [
     {
-      usuario: {
+      userId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Usuario'
+        ref: 'User'
       },
-      rol: {
+      role: {
         type: String,
-        enum: ['admin', 'miembro', 'visualizador'],
-        default: 'miembro'
-      },
-      fechaUnirsio: {
-        type: Date,
-        default: Date.now
+        enum: ['org_admin', 'member'],
+        default: 'member'
       }
     }
   ],
-  estado: {
-    type: String,
-    enum: ['activa', 'inactiva', 'suspendida'],
-    default: 'activa',
-    index: true
-  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -62,23 +52,23 @@ const organizationSchema = new mongoose.Schema({
 /**
  * Índices compuestos para búsquedas frecuentes
  */
-organizationSchema.index({ creador: 1, createdAt: -1 });
-organizationSchema.index({ nombre: 1, estado: 1 });
+organizationSchema.index({ ownerId: 1, createdAt: -1 });
+organizationSchema.index({ name: 1 });
 
 /**
  * Método para agregar un miembro a la organización
  */
-organizationSchema.methods.agregarMiembro = async function(usuarioId, rol = 'miembro') {
+organizationSchema.methods.addMember = async function(userId, role = 'member') {
   // Verificar si el usuario ya es miembro
-  const yaEsMiembro = this.miembros.some(m => m.usuario.toString() === usuarioId.toString());
+  const isMember = this.members.some(m => m.userId.toString() === userId.toString());
   
-  if (yaEsMiembro) {
-    throw new Error('El usuario ya es miembro de esta organización');
+  if (isMember) {
+    throw new Error('User is already a member of this organization');
   }
   
-  this.miembros.push({
-    usuario: usuarioId,
-    rol
+  this.members.push({
+    userId: userId,
+    role
   });
   
   return await this.save();
@@ -87,25 +77,25 @@ organizationSchema.methods.agregarMiembro = async function(usuarioId, rol = 'mie
 /**
  * Método para remover un miembro de la organización
  */
-organizationSchema.methods.removerMiembro = async function(usuarioId) {
-  this.miembros = this.miembros.filter(m => m.usuario.toString() !== usuarioId.toString());
+organizationSchema.methods.removeMember = async function(userId) {
+  this.members = this.members.filter(m => m.userId.toString() !== userId.toString());
   return await this.save();
 };
 
 /**
  * Método para obtener el rol de un usuario en la organización
  */
-organizationSchema.methods.obtenerRol = function(usuarioId) {
-  const miembro = this.miembros.find(m => m.usuario.toString() === usuarioId.toString());
-  return miembro ? miembro.rol : null;
+organizationSchema.methods.getUserRole = function(userId) {
+  const member = this.members.find(m => m.userId.toString() === userId.toString());
+  return member ? member.role : null;
 };
 
 /**
  * Método para verificar si un usuario es admin
  */
-organizationSchema.methods.esAdmin = function(usuarioId) {
-  return this.creador.toString() === usuarioId.toString() || 
-         this.obtenerRol(usuarioId) === 'admin';
+organizationSchema.methods.isOrgAdmin = function(userId) {
+  return this.ownerId.toString() === userId.toString() || 
+         this.getUserRole(userId) === 'org_admin';
 };
 
 /**

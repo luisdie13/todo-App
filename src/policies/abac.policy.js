@@ -1,41 +1,43 @@
 /**
- * Motor ABAC (Attribute-Based Access Control)
+ * ABAC Engine (Attribute-Based Access Control)
  * 
- * Proporciona un sistema flexible de control de acceso basado en atributos:
- * - usuario (rol global, permisos especiales)
- * - recurso (tipo, estado, propietario)
- * - contexto (acción solicitada, organización, proyecto)
+ * Provides a flexible attribute-based access control system:
+ * - user (global role, special permissions)
+ * - resource (type, status, owner)
+ * - context (requested action, organization, project)
  * 
- * Las políticas se definen como funciones que retornan true/false
+ * Policies are defined as functions that return true/false
  */
 
 const Membership = require('../models/membership.model');
 const Project = require('../models/project.model');
-const Usuario = require('../models/usuario.model');
+const User = require('../models/user.model');
 
 /**
- * Contexto ABAC - información completa para evaluación de políticas
+ * ABAC Context - complete information for policy evaluation
  */
 class ABACContext {
   constructor({
-    usuario,
-    recurso,
-    accion,
-    organizacion = null,
-    proyecto = null,
-    recursoId = null
+    user,
+    resource,
+    action,
+    organization = null,
+    project = null,
+    resourceId = null,
+    resourceObj = null
   }) {
-    this.usuario = usuario; // req.usuario
-    this.recurso = recurso; // 'task', 'project', 'organization'
-    this.accion = accion; // 'read', 'create', 'update', 'delete', 'mark_done'
-    this.organizacion = organizacion;
-    this.proyecto = proyecto;
-    this.recursoId = recursoId;
+    this.user = user; // req.user
+    this.resource = resource; // 'task', 'project', 'organization'
+    this.action = action; // 'read', 'create', 'update', 'delete', 'mark_done'
+    this.organization = organization;
+    this.project = project;
+    this.resourceId = resourceId;
+    this.resourceObj = resourceObj;
   }
 }
 
 /**
- * Motor ABAC - evalúa políticas
+ * ABAC Engine - evaluates policies
  */
 class ABACEngine {
   constructor() {
@@ -44,21 +46,21 @@ class ABACEngine {
   }
 
   /**
-   * Registra una política
-   * @param {String} key - Identificador único (ej: "task.read")
-   * @param {Function} evaluator - Función que retorna true si se permite
+   * Registers a policy
+   * @param {String} key - Unique identifier (e.g.: "task.read")
+   * @param {Function} evaluator - Function that returns true if allowed
    */
   registerPolicy(key, evaluator) {
     this.policies.set(key, evaluator);
   }
 
   /**
-   * Evalúa si una acción está permitida
-   * @param {ABACContext} context - Contexto para evaluación
+   * Evaluates if an action is allowed
+   * @param {ABACContext} context - Context for evaluation
    * @returns {Promise<Boolean>}
    */
   async evaluate(context) {
-    const policyKey = `${context.recurso}.${context.accion}`;
+    const policyKey = `${context.resource}.${context.action}`;
     
     if (!this.policies.has(policyKey)) {
       console.warn(`No policy found for: ${policyKey}`);
@@ -75,275 +77,326 @@ class ABACEngine {
   }
 
   /**
-   * Registra todas las políticas por defecto
+   * Registers all default policies
    */
   registerDefaultPolicies() {
-    // ===== POLÍTICAS DE TAREAS =====
+    // ===== TASK POLICIES =====
     this.registerPolicy('task.read', async (ctx) => {
-      const { usuario, proyecto, recursoId } = ctx;
+      const { user, project, resourceObj } = ctx;
 
-      // Super admin puede leer cualquier tarea
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can read any task
+      if (user.role === 'super_admin') return true;
 
-      // Si no hay proyecto, solo el propietario puede leer
-      if (!proyecto) return false;
+      // If there's no project, only the owner can read
+      if (!project) return false;
 
-      // Si el proyecto está archivado, solo lectura es permitida
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (!membership) return false;
 
-      // Todos los roles pueden leer (project_admin, developer, viewer)
+      // All roles can read (project_admin, developer, viewer)
       return membership.canRead();
     });
 
     this.registerPolicy('task.create', async (ctx) => {
-      const { usuario, proyecto } = ctx;
+      const { user, project } = ctx;
 
-      // Super admin puede crear tareas en cualquier proyecto
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can create tasks in any project
+      if (user.role === 'super_admin') return true;
 
-      // Sin proyecto, solo usuarios autenticados pueden crear
-      if (!proyecto) return true;
+      // Without project, only authenticated users can create
+      if (!project) return true;
 
-      // Proyecto archivado: no se pueden crear tareas
-      if (proyecto.estado === 'archivado') return false;
+      // Archived project: cannot create tasks
+      if (project.status === 'archived') return false;
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (!membership) return false;
 
-      // Solo project_admin y developer pueden crear
+      // Only project_admin and developer can create
       return membership.canWrite();
     });
 
     this.registerPolicy('task.update', async (ctx) => {
-      const { usuario, proyecto, recurso: tarea } = ctx;
+      const { user, project, resourceObj: task } = ctx;
 
-      // Super admin puede actualizar cualquier tarea
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can update any task
+      if (user.role === 'super_admin') return true;
 
-      // Proyecto archivado: no se pueden actualizar tareas
-      if (proyecto && proyecto.estado === 'archivado') return false;
+      // Archived project: cannot update tasks
+      if (project && project.status === 'archived') return false;
 
-      // Sin proyecto, solo el propietario puede actualizar
-      if (!proyecto) {
-        return tarea.usuarioId.toString() === usuario.id;
+      // Without project, only the owner can update
+      if (!project) {
+        if (!task.userId) return false;
+        return task.userId.toString?.() === user.id || task.userId === user.id;
       }
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (!membership) return false;
 
-      // project_admin puede editar cualquier tarea
+      // project_admin can edit any task
       if (membership.isAdmin()) return true;
 
-      // developer solo puede editar sus propias tareas
+      // developer can only edit their own tasks
       if (membership.hasRole('developer')) {
-        return tarea.usuarioId.toString() === usuario.id;
+        return task.userId.toString() === user.id;
       }
 
-      // viewer no puede actualizar
+      // viewer cannot update
       return false;
     });
 
     this.registerPolicy('task.delete', async (ctx) => {
-      const { usuario, proyecto, recurso: tarea } = ctx;
+      const { user, project, resourceObj: task } = ctx;
 
-      // Super admin puede eliminar cualquier tarea
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can delete any task
+      if (user.role === 'super_admin') return true;
 
-      // Proyecto archivado: no se pueden eliminar tareas
-      if (proyecto && proyecto.estado === 'archivado') return false;
+      // Archived project: cannot delete tasks
+      if (project && project.status === 'archived') return false;
 
-      // Sin proyecto, solo el propietario puede eliminar
-      if (!proyecto) {
-        return tarea.usuarioId.toString() === usuario.id;
+      // Without project, only the owner can delete
+      if (!project) {
+        if (!task.userId) return false;
+        return task.userId.toString?.() === user.id || task.userId === user.id;
       }
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (!membership) return false;
 
-      // Solo project_admin puede eliminar
+      // Only project_admin can delete
       return membership.isAdmin();
     });
 
     this.registerPolicy('task.mark_done', async (ctx) => {
-      const { usuario, proyecto, recurso: tarea } = ctx;
+      const { user, project, resourceObj: task } = ctx;
 
-      // Super admin puede marcar cualquier tarea como done
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can mark any task as done
+      if (user.role === 'super_admin') return true;
 
-      // Proyecto archivado: no se pueden marcar tareas como done
-      if (proyecto && proyecto.estado === 'archivado') return false;
+      // Archived project: cannot mark tasks as done
+      if (project && project.status === 'archived') return false;
 
-      // Sin proyecto, solo el propietario puede marcar como done
-      if (!proyecto) {
-        return tarea.usuarioId.toString() === usuario.id;
+      // Without project, only the owner can mark as done
+      if (!project) {
+        if (!task.userId) return false;
+        return task.userId.toString?.() === user.id || task.userId === user.id;
       }
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (!membership) return false;
 
-      // project_admin puede marcar cualquier tarea como done
+      // project_admin can mark any task as done
       if (membership.isAdmin()) return true;
 
-      // developer y assignee pueden marcar solo sus propias tareas como done
+      // developer and assignee can mark only their own tasks as done
       if (membership.hasRole('developer')) {
-        // Si la tarea tiene assignee, solo el assignee puede marcar como done
-        if (tarea.assignee) {
-          return tarea.assignee.toString() === usuario.id;
+        // If the task has assignee, only the assignee can mark as done
+        if (task.assignee) {
+          const assigneeId = task.assignee.toString?.() || task.assignee;
+          return assigneeId === user.id;
         }
-        // Si no hay assignee, el propietario puede marcar como done
-        return tarea.usuarioId.toString() === usuario.id;
+        // If no assignee, the owner can mark as done
+        if (!task.userId) return false;
+        const taskOwnerId = task.userId.toString?.() || task.userId;
+        return taskOwnerId === user.id;
       }
 
-      // viewer no puede marcar como done
+      // viewer cannot mark as done
       return false;
     });
 
-    // ===== POLÍTICAS DE PROYECTOS =====
+    // ===== PROJECT POLICIES =====
     this.registerPolicy('project.read', async (ctx) => {
-      const { usuario, proyecto } = ctx;
+      const { user, project } = ctx;
 
-      // Super admin puede leer cualquier proyecto
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can read any project
+      if (user.role === 'super_admin') return true;
 
-      if (!proyecto) return false;
+      if (!project) return false;
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
       if (membership) return true;
 
-      // Creador del proyecto puede leerlo
-      if (proyecto.creador.toString() === usuario.id) return true;
+      // Project creator can read it
+      if (project.ownerId?.toString() === user.id) return true;
 
       return false;
     });
 
     this.registerPolicy('project.update', async (ctx) => {
-      const { usuario, proyecto } = ctx;
+      const { user, project } = ctx;
 
-      // Super admin puede actualizar cualquier proyecto
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can update any project
+      if (user.role === 'super_admin') return true;
 
-      if (!proyecto) return false;
+      if (!project) return false;
 
-      // Proyecto archivado: no se puede actualizar
-      if (proyecto.estado === 'archivado') return false;
+      // Archived project: cannot update
+      if (project.status === 'archived') return false;
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
-      // Solo project_admin puede actualizar
+      // Only project_admin can update
       if (membership && membership.isAdmin()) return true;
 
-      // Creador del proyecto puede actualizarlo
-      if (proyecto.creador.toString() === usuario.id) return true;
+      // Project creator can update it
+      if (project.ownerId?.toString() === user.id) return true;
 
       return false;
     });
 
     this.registerPolicy('project.delete', async (ctx) => {
-      const { usuario, proyecto } = ctx;
+      const { user, project } = ctx;
 
-      // Super admin puede eliminar cualquier proyecto
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can delete any project
+      if (user.role === 'super_admin') return true;
 
-      if (!proyecto) return false;
+      if (!project) return false;
 
-      // Creador del proyecto puede eliminarlo
-      return proyecto.creador.toString() === usuario.id;
+      // Project creator can delete it
+      return project.ownerId?.toString() === user.id;
     });
 
     this.registerPolicy('project.archive', async (ctx) => {
-      const { usuario, proyecto } = ctx;
+      const { user, project } = ctx;
 
-      // Super admin puede archivar cualquier proyecto
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can archive any project
+      if (user.role === 'super_admin') return true;
 
-      if (!proyecto) return false;
+      if (!project) return false;
 
-      // Verificar membresía
+      // Check membership
       const membership = await Membership.findOne({
-        userId: usuario.id,
-        projectId: proyecto._id
+        userId: user.id,
+        projectId: project._id
       });
 
-      // Solo project_admin puede archivar
+      // Only project_admin can archive
       if (membership && membership.isAdmin()) return true;
 
-      // Creador del proyecto puede archivarlo
-      return proyecto.creador.toString() === usuario.id;
+      // Project creator can archive it
+      return project.ownerId?.toString() === user.id;
     });
 
-    // ===== POLÍTICAS DE AUDITORÍA =====
+    // ===== AUDIT POLICIES =====
     this.registerPolicy('audit.read', async (ctx) => {
-      const { usuario } = ctx;
+      const { user } = ctx;
 
-      // Solo super_admin puede ver logs de auditoría
-      return usuario.rol === 'super_admin';
+      // Only super_admin can view audit logs
+      return user.role === 'super_admin';
     });
 
     this.registerPolicy('organization.view_members', async (ctx) => {
-      const { usuario, organizacion } = ctx;
+      const { user, organization } = ctx;
 
-      // Super admin puede ver miembros de cualquier organización
-      if (usuario.rol === 'super_admin') return true;
+      // Super admin can view members of any organization
+      if (user.role === 'super_admin') return true;
 
-      if (!organizacion) return false;
+      if (!organization) return false;
 
-      // Creador de la organización puede ver miembros
-      if (organizacion.creador.toString() === usuario.id) return true;
+      // Organization owner can view members
+      if (organization.ownerId.toString() === user.id) return true;
 
-      // Miembros de la organización pueden ver otros miembros
-      return organizacion.miembros.some(m => m.usuario.toString() === usuario.id);
+      // Organization members can view other members
+      return organization.members.some(m => m.userId.toString() === user.id);
     });
 
-    this.registerPolicy('organization.edit', async (ctx) => {
-      const { usuario, organizacion } = ctx;
+     this.registerPolicy('organization.edit', async (ctx) => {
+       const { user, organization } = ctx;
 
-      // Super admin puede editar cualquier organización
-      if (usuario.rol === 'super_admin') return true;
+       // Super admin can edit any organization
+       if (user.role === 'super_admin') return true;
 
-      if (!organizacion) return false;
+       if (!organization) return false;
 
-      // Solo el creador de la organización puede editarla
-      return organizacion.creador.toString() === usuario.id;
-    });
-  }
+       // Only the organization owner can edit it
+       return organization.ownerId.toString() === user.id;
+     });
+
+     // ===== PROJECT CREATION POLICY =====
+     this.registerPolicy('project.create', async (ctx) => {
+       const { user, organization } = ctx;
+
+       // Super admin can create projects in any organization
+       if (user.role === 'super_admin') return true;
+
+       if (!organization) return false;
+
+       // Organization owner can create projects
+       if (organization.ownerId.toString() === user.id) return true;
+
+       // Organization admin can create projects
+       if (organization.members && Array.isArray(organization.members)) {
+         const isMember = organization.members.some(m => 
+           m.userId.toString() === user.id && m.role === 'org_admin'
+         );
+         if (isMember) return true;
+       }
+
+       return false;
+     });
+
+     // ===== ORGANIZATION CREATE_PROJECT POLICY (alias for project.create in org context) =====
+     this.registerPolicy('organization.create_project', async (ctx) => {
+       const { user, organization } = ctx;
+
+       // Super admin can create projects in any organization
+       if (user.role === 'super_admin') return true;
+
+       if (!organization) return false;
+
+       // Organization owner can create projects
+       if (organization.ownerId.toString() === user.id) return true;
+
+       // Organization admin can create projects
+       if (organization.members && Array.isArray(organization.members)) {
+         const isMember = organization.members.some(m => 
+           m.userId.toString() === user.id && m.role === 'org_admin'
+         );
+         if (isMember) return true;
+       }
+
+       return false;
+     });
+   }
 }
 
-// Instancia global del motor ABAC
+// Global instance of the ABAC engine
 const abacEngine = new ABACEngine();
 
 module.exports = {

@@ -1,77 +1,88 @@
-const Usuario = require('../models/usuario.model');
+const User = require('../models/user.model');
 const tokenService = require('./tokenService');
 const auditLogService = require('./auditLog.service');
 
-const registro = async (email, password, req) => {
-  const usuarioExistente = await Usuario.findOne({ email });
+const register = async (email, password, req) => {
+  const existingUser = await User.findOne({ email });
   
-  if (usuarioExistente) {
-    throw new Error('El correo ya está registrado');
+  if (existingUser) {
+    throw new Error('Email is already registered');
   }
 
-  const usuario = new Usuario({ email, password });
-  await usuario.save();
+  const user = new User({ email, password });
+  await user.save();
 
   // Registrar evento de auditoría
   await auditLogService.log('auth.register', req, {
-    email: usuario.email,
-    userId: usuario._id,
+    email: user.email,
+    userId: user._id,
     statusCode: 201
   });
 
-  const accessToken = tokenService.generateAccessToken(usuario);
-  const { token: refreshToken } = tokenService.generateRefreshToken(usuario);
+  const accessToken = tokenService.generateAccessToken(user);
+  const { token: refreshToken } = tokenService.generateRefreshToken(user);
 
   return { 
-    usuario: usuario.toJSON(), 
+    user: user.toJSON(), 
     accessToken,
     refreshToken
   };
 };
 
 const login = async (email, password, req, isSuccess = false) => {
-  const usuario = await Usuario.findOne({ email });
+  const user = await User.findOne({ email });
 
-  if (!usuario) {
+  if (!user) {
     // Registrar fallo de login
     await auditLogService.log('auth.login.failure', req, {
       email,
       statusCode: 401,
-      detalles: 'Usuario no encontrado'
+      details: 'User not found'
     });
-    throw new Error('Credenciales inválidas');
+    throw new Error('Invalid credentials');
   }
 
-  const esValida = await usuario.compararPassword(password);
-
-  if (!esValida) {
+  // Verificar si el usuario está activo
+  if (!user.isActive) {
     // Registrar fallo de login
     await auditLogService.log('auth.login.failure', req, {
       email,
       statusCode: 401,
-      detalles: 'Contraseña incorrecta'
+      details: 'User account is inactive'
     });
-    throw new Error('Credenciales inválidas');
+    throw new Error('User account is inactive');
   }
 
-  const accessToken = tokenService.generateAccessToken(usuario);
-  const { token: refreshToken } = tokenService.generateRefreshToken(usuario);
+  const isValid = await user.comparePassword(password);
+
+  if (!isValid) {
+    // Registrar fallo de login
+    await auditLogService.log('auth.login.failure', req, {
+      email,
+      statusCode: 401,
+      details: 'Invalid password'
+    });
+    throw new Error('Invalid credentials');
+  }
+
+  const accessToken = tokenService.generateAccessToken(user);
+  const { token: refreshToken } = tokenService.generateRefreshToken(user);
 
   // Registrar login exitoso
   await auditLogService.log('auth.login.success', req, {
-    email: usuario.email,
-    userId: usuario._id,
+    email: user.email,
+    userId: user._id,
     statusCode: 200
   });
 
   return { 
-    usuario: usuario.toJSON(), 
+    user: user.toJSON(), 
     accessToken,
     refreshToken
   };
 };
 
 module.exports = {
-  registro,
+  register,
   login
 };

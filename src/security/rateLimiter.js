@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 const auditLogService = require('../services/auditLog.service');
 
 /**
@@ -12,9 +13,9 @@ const rateLimitLogin = rateLimit({
   max: 5, // 5 intentos máximo
   keyGenerator: (req) => {
     // Llave combinada de IP + Email para mayor precisión
-    const ip = req.ip;
+    const ipKey = ipKeyGenerator(req);
     const email = req.body?.email || '';
-    return `${ip}-${email}`;
+    return `${ipKey}-${email}`;
   },
   handler: async (req, res) => {
     const retryAfter = Math.ceil(req.rateLimit.resetTime / 1000);
@@ -49,9 +50,9 @@ const rateLimitRegister = rateLimit({
   max: 3, // 3 intentos máximo
   keyGenerator: (req) => {
     // Llave combinada de IP + Email
-    const ip = req.ip;
+    const ipKey = ipKeyGenerator(req);
     const email = req.body?.email || '';
-    return `${ip}-${email}`;
+    return `${ipKey}-${email}`;
   },
   handler: (req, res) => {
     const retryAfter = Math.ceil(req.rateLimit.resetTime / 1000);
@@ -79,8 +80,8 @@ const rateLimitGeneral = rateLimit({
   keyGenerator: (req) => {
     // Usar el user ID si está autenticado, sino usar IP
     const userId = req.user?.id;
-    const ip = req.ip;
-    return userId ? `user-${userId}` : `ip-${ip}`;
+    const ipKey = ipKeyGenerator(req);
+    return userId ? `user-${userId}` : ipKey;
   },
   handler: (req, res) => {
     const retryAfter = Math.ceil(req.rateLimit.resetTime / 1000);

@@ -4,6 +4,7 @@ const authController = require('../controllers/auth.controller');
 const validate = require('../middleware/validate');
 const { registerSchema, loginSchema } = require('../validators/auth.validator');
 const { rateLimitLogin, rateLimitRegister } = require('../security/rateLimiter');
+const { authentication } = require('../middleware/authentication');
 
 // POST /api/auth/registro
 router.post('/registro', rateLimitRegister, validate(registerSchema), authController.register);
@@ -18,6 +19,6 @@ router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);
 
 // GET /api/auth/me
-router.get('/me', authController.getMe);
+router.get('/me', authentication, authController.getMe);
 
 module.exports = router;

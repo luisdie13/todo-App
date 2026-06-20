@@ -5,6 +5,7 @@
  */
 const validate = (schema) => {
   return (req, res, next) => {
+    console.log("Cuerpo recibido en backend:", req.body);
     const { error, value } = schema.validate(req.body, {
       abortEarly: false,
       stripUnknown: true
@@ -13,6 +14,7 @@ const validate = (schema) => {
     if (error) {
       // Extraer los mensajes de error
       const messages = error.details.map(detail => detail.message).join(', ');
+      console.log("Errores de validación:", messages);
       return res.status(422).json({
         error: 'Unprocessable Entity',
         message: messages

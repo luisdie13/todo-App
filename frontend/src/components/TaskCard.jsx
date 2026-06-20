@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   canEditTask,
   canDeleteTask,
@@ -6,6 +6,7 @@ import {
   isViewer,
   getTaskActions
 } from '../utils/permissions';
+import CommentSection from './CommentSection';
 
 /**
  * Componente TaskCard
@@ -29,6 +30,7 @@ const TaskCard = ({
   onDelete,
   onMarkDone
 }) => {
+  const [mostrarComentarios, setMostrarComentarios] = useState(false);
   // Obtener permisos para esta tarea
   const actions = getTaskActions(usuario, tarea, membership, proyecto);
   

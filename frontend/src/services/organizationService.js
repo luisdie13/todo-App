@@ -23,11 +23,11 @@ export const getMyOrganizations = async () => {
   }
 };
 
-export const createOrganization = async (nombre, descripcion = '') => {
+export const createOrganization = async (name, description = '') => {
   try {
     const response = await api.post('/organizations', {
-      nombre,
-      descripcion
+      name,
+      description
     });
     return {
       success: true,
@@ -59,11 +59,11 @@ export const getOrganization = async (id) => {
   }
 };
 
-export const updateOrganization = async (id, { nombre, descripcion, estado }) => {
+export const updateOrganization = async (id, { name, description, estado }) => {
   try {
     const response = await api.put(`/organizations/${id}`, {
-      nombre,
-      descripcion,
+      name,
+      description,
       estado
     });
     return {
@@ -96,11 +96,11 @@ export const deleteOrganization = async (id) => {
   }
 };
 
-export const inviteMember = async (organizationId, email, rol = 'miembro') => {
+export const inviteMember = async (organizationId, email, role = 'member') => {
   try {
     const response = await api.post(`/organizations/${organizationId}/invite`, {
       email,
-      rol
+      role
     });
     return {
       success: true,

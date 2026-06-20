@@ -32,7 +32,7 @@ const loginSchema = Joi.object({
     .messages({
       'any.required': 'Password es requerido'
     })
-});
+}).strict().unknown(false);
 
 module.exports = {
   registerSchema,

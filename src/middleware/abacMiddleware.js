@@ -6,121 +6,121 @@
 const { ABACContext, abacEngine } = require('../policies/abac.policy');
 const Project = require('../models/project.model');
 const Organization = require('../models/organization.model');
-const Tarea = require('../models/tarea.model');
+const Task = require('../models/task.model');
 const auditLogService = require('../services/auditLog.service');
 
 /**
- * Verifica un permiso usando ABAC
- * @param {String} recurso - Tipo de recurso ('task', 'project', 'organization')
- * @param {String} accion - Acción a verificar ('read', 'create', 'update', 'delete', 'mark_done')
- * @returns {Function} Middleware Express
+ * Verifies permission using ABAC
+ * @param {String} resource - Resource type ('task', 'project', 'organization')
+ * @param {String} action - Action to verify ('read', 'create', 'update', 'delete', 'mark_done')
+ * @returns {Function} Express middleware
  */
-const checkABACPermission = (recurso, accion) => {
+const checkABACPermission = (resource, action) => {
   return async (req, res, next) => {
     try {
-      const usuario = req.usuario;
-      let proyecto = null;
-      let organizacion = null;
-      let recursoObj = null;
+       const user = req.user;
+       let project = null;
+       let organization = null;
+       let resourceObj = null;
 
-      // Obtener el proyecto si es necesario
+      // Get the project if necessary
       if (req.params.projectId) {
-        proyecto = await Project.findById(req.params.projectId);
-        if (!proyecto) {
-          return res.status(404).json({ error: 'Proyecto no encontrado' });
+        project = await Project.findById(req.params.projectId);
+        if (!project) {
+          return res.status(404).json({ error: 'Project not found' });
         }
       }
 
-      // Obtener la organización si es necesario
+      // Get the organization if necessary
       if (req.params.organizationId) {
-        organizacion = await Organization.findById(req.params.organizationId);
-        if (!organizacion) {
-          return res.status(404).json({ error: 'Organización no encontrada' });
+        organization = await Organization.findById(req.params.organizationId);
+        if (!organization) {
+          return res.status(404).json({ error: 'Organization not found' });
         }
       }
 
-      // Obtener el recurso específico si es necesario
-      if (recurso === 'task' && req.params.taskId) {
-        recursoObj = await Tarea.findById(req.params.taskId);
-        if (!recursoObj) {
-          return res.status(404).json({ error: 'Tarea no encontrada' });
+      // Get the specific resource if necessary
+      if (resource === 'task' && req.params.taskId) {
+        resourceObj = await Task.findById(req.params.taskId);
+        if (!resourceObj) {
+          return res.status(404).json({ error: 'Task not found' });
         }
       }
 
-      // Crear contexto ABAC
+      // Create ABAC context
       const context = new ABACContext({
-        usuario,
-        recurso,
-        accion,
-        organizacion,
-        proyecto,
-        recursoObj
+        user,
+        resource,
+        action,
+        organization,
+        project,
+        resourceObj
       });
 
-      // Evaluar política
-      const permitido = await abacEngine.evaluate(context);
+      // Evaluate policy
+      const allowed = await abacEngine.evaluate(context);
 
-      if (!permitido) {
-        // Registrar intento no autorizado
+      if (!allowed) {
+        // Log unauthorized attempt
         await auditLogService.logTaskEvent('access.denied', req, {
-          recurso,
-          accion,
-          projectId: proyecto?._id,
-          organizationId: organizacion?._id,
-          resourceId: recursoObj?._id,
-          reason: `Usuario no tiene permiso para ${accion} ${recurso}`
+          resource,
+          action,
+          projectId: project?._id,
+          organizationId: organization?._id,
+          resourceId: resourceObj?._id,
+          reason: `User does not have permission to ${action} ${resource}`
         });
 
         return res.status(403).json({
-          error: `No tienes permiso para ${accion} este ${recurso}`
+          error: `You do not have permission to ${action} this ${resource}`
         });
       }
 
-      // Guardar en req para uso posterior
-      req.proyecto = proyecto;
-      req.organizacion = organizacion;
-      req.recursoObj = recursoObj;
+      // Save in req for later use
+      req.project = project;
+      req.organization = organization;
+      req.resourceObj = resourceObj;
 
       next();
     } catch (err) {
-      console.error(`Error en checkABACPermission (${recurso}.${accion}):`, err);
-      return res.status(500).json({ error: 'Error interno del servidor' });
+      console.error(`Error in checkABACPermission (${resource}.${action}):`, err);
+      return res.status(500).json({ error: 'Internal server error' });
     }
   };
 };
 
 /**
- * Verifica si un usuario es super_admin
+ * Verifies if a user is super_admin
  */
 const checkSuperAdmin = async (req, res, next) => {
   try {
-    if (req.usuario.rol !== 'super_admin') {
+    if (req.user.role !== 'super_admin') {
       await auditLogService.logTaskEvent('access.denied', req, {
-        reason: 'Acceso solo para super_admin'
+        reason: 'Access only for super_admin'
       });
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a este recurso' });
+      return res.status(403).json({ error: 'Only super_admin can access this resource' });
     }
     next();
   } catch (err) {
-    console.error('Error en checkSuperAdmin:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('Error in checkSuperAdmin:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 /**
- * Verifica si un proyecto está archivado
+ * Verifies if a project is archived
  */
 const checkProjectNotArchived = async (req, res, next) => {
   try {
-    if (req.proyecto && req.proyecto.estado === 'archivado') {
+    if (req.project && req.project.status === 'archived') {
       return res.status(403).json({
-        error: 'No se pueden realizar cambios en proyectos archivados'
+        error: 'Cannot make changes to archived projects'
       });
     }
     next();
   } catch (err) {
-    console.error('Error en checkProjectNotArchived:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('Error in checkProjectNotArchived:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
 

@@ -7,13 +7,13 @@ const mongoose = require('mongoose');
 const membershipSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
+    ref: 'User',
     required: true,
     index: true
   },
   projectId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Organization',
+    ref: 'Project',
     required: true,
     index: true
   },

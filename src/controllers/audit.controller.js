@@ -9,15 +9,15 @@ const getAllLogs = async (req, res, next) => {
   try {
     const { limit = 50, evento, email, ip } = req.query;
 
-    // Solo super_admin puede ver logs
-    if (req.usuario.rol !== 'super_admin') {
-      await auditLogService.logTaskEvent('access.denied', req, {
-        action: 'GET',
-        recurso: 'audit.logs',
-        reason: 'Usuario no es super_admin'
-      });
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a los logs de auditoría' });
-    }
+     // Only super_admin can view logs
+      if (req.user.role !== 'super_admin') {
+        await auditLogService.logTaskEvent('access.denied', req, {
+         action: 'GET',
+         resource: 'audit.logs',
+         reason: 'User is not super_admin'
+       });
+       return res.status(403).json({ error: 'Only super_admin can access audit logs' });
+     }
 
     let query = {};
 
@@ -64,9 +64,9 @@ const getLogsByEvent = async (req, res, next) => {
     const { evento } = req.params;
     const { limit = 50 } = req.query;
 
-    // Solo super_admin puede ver logs
-    if (req.usuario.rol !== 'super_admin') {
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a los logs de auditoría' });
+    // Only super_admin can view logs
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
     }
 
     const logs = await AuditLog.find({ evento })
@@ -102,9 +102,9 @@ const getLogsByUser = async (req, res, next) => {
     const { userId } = req.params;
     const { limit = 50 } = req.query;
 
-    // Solo super_admin puede ver logs
-    if (req.usuario.rol !== 'super_admin') {
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a los logs de auditoría' });
+    // Only super_admin can view logs
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
     }
 
     const logs = await AuditLog.find({ userId })
@@ -140,9 +140,9 @@ const getLogsByIP = async (req, res, next) => {
     const { ip } = req.params;
     const { limit = 50 } = req.query;
 
-    // Solo super_admin puede ver logs
-    if (req.usuario.rol !== 'super_admin') {
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a los logs de auditoría' });
+    // Only super_admin can view logs
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
     }
 
     const logs = await AuditLog.find({ ip })
@@ -150,7 +150,7 @@ const getLogsByIP = async (req, res, next) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Registrar acceso
+    // Register access
     await auditLogService.logTaskEvent('audit.logs_viewed', req, {
       ip,
       logsCount: logs.length
@@ -164,23 +164,23 @@ const getLogsByIP = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener logs por IP:', err);
+    console.error('Error getting logs by IP:', err);
     next(err);
   }
 };
 
 /**
  * GET /api/audit/logs/email/:email
- * Obtiene logs por email (SOLO SUPER_ADMIN)
+ * Gets logs by email (SUPER_ADMIN ONLY)
  */
 const getLogsByEmail = async (req, res, next) => {
   try {
     const { email } = req.params;
     const { limit = 50 } = req.query;
 
-    // Solo super_admin puede ver logs
-    if (req.usuario.rol !== 'super_admin') {
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a los logs de auditoría' });
+    // Only super_admin can view logs
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
     }
 
     const logs = await AuditLog.find({ email: email.toLowerCase() })
@@ -188,7 +188,7 @@ const getLogsByEmail = async (req, res, next) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Registrar acceso
+    // Register access
     await auditLogService.logTaskEvent('audit.logs_viewed', req, {
       email,
       logsCount: logs.length
@@ -202,20 +202,20 @@ const getLogsByEmail = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener logs por email:', err);
+    console.error('Error getting logs by email:', err);
     next(err);
   }
 };
 
 /**
  * GET /api/audit/stats
- * Obtiene estadísticas de auditoría (SOLO SUPER_ADMIN)
+ * Gets audit statistics (SUPER_ADMIN ONLY)
  */
 const getAuditStats = async (req, res, next) => {
   try {
-    // Solo super_admin puede ver estadísticas
-    if (req.usuario.rol !== 'super_admin') {
-      return res.status(403).json({ error: 'Solo super_admin puede acceder a las estadísticas de auditoría' });
+    // Only super_admin can view statistics
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super_admin can access audit statistics' });
     }
 
     // Contar eventos por tipo

@@ -1,126 +1,55 @@
-/**
- * Servicio de almacenamiento de tokens
- * Maneja la persistencia y recuperación de tokens del localStorage
- */
+// Almacenamiento en memoria para tokens
+let accessToken = null;
+let refreshToken = null;
 
-const ACCESS_TOKEN_KEY = 'accessToken';
-const REFRESH_TOKEN_KEY = 'refreshToken';
-const USER_KEY = 'user';
+// ============================================================
+// BANDERA DE CRÍTICO FALLIDO: Evitar bucle infinito
+// ============================================================
+let criticalFailureState = false;
 
-/**
- * Obtiene el access token del localStorage
- */
-export const getAccessToken = () => {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+export const setTokens = (access, refresh) => {
+  accessToken = access;
+  refreshToken = refresh;
+  // Si guardamos tokens exitosamente, resetear el estado crítico
+  criticalFailureState = false;
 };
 
-/**
- * Guarda el access token en localStorage
- */
-export const setAccessToken = (token) => {
-  if (token) {
-    localStorage.setItem(ACCESS_TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-  }
-};
+export const getAccessToken = () => accessToken;
 
-/**
- * Obtiene el refresh token del localStorage
- */
-export const getRefreshToken = () => {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
-};
+export const getRefreshToken = () => refreshToken;
 
-/**
- * Guarda el refresh token en localStorage
- */
-export const setRefreshToken = (token) => {
-  if (token) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-  }
-};
-
-/**
- * Obtiene la información del usuario del localStorage
- */
-export const getUser = () => {
-  const userStr = localStorage.getItem(USER_KEY);
-  return userStr ? JSON.parse(userStr) : null;
-};
-
-/**
- * Guarda la información del usuario en localStorage
- */
-export const setUser = (user) => {
-  if (user) {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-  } else {
-    localStorage.removeItem(USER_KEY);
-  }
-};
-
-/**
- * Guarda todos los tokens y usuario tras login exitoso
- */
-export const saveCredentials = (accessToken, refreshToken, user) => {
-  setAccessToken(accessToken);
-  setRefreshToken(refreshToken);
-  setUser(user);
-};
-
-/**
- * Limpia todos los tokens y usuario (logout)
- */
 export const clearCredentials = () => {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  accessToken = null;
+  refreshToken = null;
+  console.log('✓ Credenciales limpiadas');
+};
+
+export const isAuthenticated = () => !!accessToken;
+
+// ============================================================
+// MÉTODOS DE CONTROL DE ESTADO CRÍTICO
+// ============================================================
+
+/**
+ * Marca que hemos entrado en un estado de fallo crítico
+ * Esto previene reintentos infinitos de refresh
+ */
+export const setCriticalFailure = () => {
+  criticalFailureState = true;
+  console.error('🛑 [CRÍTICO] Marcado como fallo crítico. No se intentarán más refreshes.');
 };
 
 /**
- * Verifica si hay un usuario autenticado
+ * Verifica si estamos en un estado de fallo crítico
  */
-export const isAuthenticated = () => {
-  return !!getAccessToken() && !!getRefreshToken();
+export const isCriticalFailure = () => {
+  return criticalFailureState;
 };
 
 /**
- * Decodifica un JWT para obtener su payload (sin verificación)
- * Solo uso para verificar información básica del token
+ * Resetea el estado crítico (solo para login exitoso)
  */
-export const decodeToken = (token) => {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-
-    const decoded = JSON.parse(atob(parts[1]));
-    return decoded;
-  } catch (error) {
-    console.error('Error decodificando token:', error);
-    return null;
-  }
-};
-
-/**
- * Verifica si el access token está próximo a expirar (dentro de 5 minutos)
- */
-export const isAccessTokenExpiringSoon = () => {
-  const token = getAccessToken();
-  if (!token) return true;
-
-  const decoded = decodeToken(token);
-  if (!decoded || !decoded.exp) return true;
-
-  // exp está en segundos, convertir a milisegundos
-  const expirationTime = decoded.exp * 1000;
-  const currentTime = Date.now();
-  const timeUntilExpiry = expirationTime - currentTime;
-
-  // Retornar true si expira en menos de 5 minutos
-  return timeUntilExpiry < 5 * 60 * 1000;
+export const resetCriticalFailure = () => {
+  criticalFailureState = false;
+  console.log('✓ Estado crítico reseteado');
 };

@@ -1,66 +1,44 @@
 const express = require('express');
 const router = express.Router();
+
+// 1. Importar el middleware estándar en inglés
 const { authentication } = require('../middleware/authentication');
+
 const projectController = require('../controllers/project.controller');
 const taskController = require('../controllers/task.controller');
 
-/**
- * Rutas de Proyectos y Tareas
- */
-
-// Middleware de autenticación para todas las rutas
+// Aplicar autenticación global a este router
 router.use(authentication);
 
 /**
- * GET /api/projects/:projectId
- * Obtiene un proyecto específico
+ * 2. SUBROUTER PARA TAREAS ANIDADAS
+ * (Debe ir ARRIBA de las rutas genéricas para evitar el conflicto de pattern matching)
  */
+const tasksRouter = express.Router({ mergeParams: true });
+
+// Forzar la seguridad con el mismo middleware dentro del subrouter
+tasksRouter.use(authentication);
+
+// Endpoints del Subrouter
+tasksRouter.get('/', taskController.getProjectTasks);
+tasksRouter.post('/', taskController.createProjectTask);
+tasksRouter.get('/:taskId', taskController.getProjectTask);
+tasksRouter.put('/:taskId', taskController.updateProjectTask);
+tasksRouter.delete('/:taskId', taskController.deleteProjectTask);
+
+// Montar el subrouter primero
+router.use('/:projectId/tasks', tasksRouter);
+
+
+/**
+ * 3. RUTAS GENÉRICAS DE PROYECTOS
+ */
+router.get('/', projectController.getMyProjects);
+router.get('/:projectId/members', projectController.getProjectMembers);
 router.get('/:projectId', projectController.getProject);
-
-/**
- * PUT /api/projects/:projectId
- * Actualiza un proyecto
- */
 router.put('/:projectId', projectController.updateProject);
-
-/**
- * DELETE /api/projects/:projectId
- * Elimina un proyecto
- */
 router.delete('/:projectId', projectController.deleteProject);
-
-/**
- * TAREAS DEL PROYECTO
- */
-
-/**
- * GET /api/projects/:projectId/tasks
- * Obtiene todas las tareas de un proyecto
- */
-router.get('/:projectId/tasks', taskController.getProjectTasks);
-
-/**
- * POST /api/projects/:projectId/tasks
- * Crea una nueva tarea en un proyecto
- */
-router.post('/:projectId/tasks', taskController.createProjectTask);
-
-/**
- * GET /api/projects/:projectId/tasks/:taskId
- * Obtiene una tarea específica
- */
-router.get('/:projectId/tasks/:taskId', taskController.getProjectTask);
-
-/**
- * PUT /api/projects/:projectId/tasks/:taskId
- * Actualiza una tarea
- */
-router.put('/:projectId/tasks/:taskId', taskController.updateProjectTask);
-
-/**
- * DELETE /api/projects/:projectId/tasks/:taskId
- * Elimina una tarea
- */
-router.delete('/:projectId/tasks/:taskId', taskController.deleteProjectTask);
+router.put('/:projectId/archive', projectController.archiveProject);
+router.put('/:projectId/unarchive', projectController.unarchiveProject);
 
 module.exports = router;

@@ -1,4 +1,4 @@
-import { getToken } from './tokenStorage';
+import { getAccessToken } from './tokenStorage';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
 
@@ -8,7 +8,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
  */
 export const getMyProjects = async () => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
@@ -46,7 +46,7 @@ export const getMyProjects = async () => {
  */
 export const getProject = async (projectId) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
@@ -84,7 +84,7 @@ export const getProject = async (projectId) => {
  */
 export const getProjectTasks = async (projectId) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
@@ -122,22 +122,23 @@ export const getProjectTasks = async (projectId) => {
  */
 export const createTask = async (projectId, taskData) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
 
-    const response = await fetch(`${API_URL}/projects/${projectId}/tasks`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        title: taskData.title,
-        description: taskData.description || null
-      })
-    });
+     const response = await fetch(`${API_URL}/projects/${projectId}/tasks`, {
+       method: 'POST',
+       headers: {
+         'Authorization': `Bearer ${token}`,
+         'Content-Type': 'application/json'
+       },
+       body: JSON.stringify({
+         title: taskData.title,
+         description: taskData.description || null,
+         sensitive: taskData.sensitive || false
+       })
+     });
 
     if (!response.ok) {
       const errorData = await response.json();
@@ -163,7 +164,7 @@ export const createTask = async (projectId, taskData) => {
  */
 export const getTask = async (projectId, taskId) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
@@ -200,7 +201,7 @@ export const getTask = async (projectId, taskId) => {
  */
 export const updateTask = async (projectId, taskId, taskData) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }
@@ -242,7 +243,7 @@ export const updateTask = async (projectId, taskId, taskData) => {
  */
 export const deleteTask = async (projectId, taskId) => {
   try {
-    const token = getToken();
+    const token = getAccessToken();
     if (!token) {
       return { success: false, error: 'No autenticado' };
     }

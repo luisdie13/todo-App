@@ -1,101 +1,28 @@
 const express = require('express');
 const router = express.Router();
-const Tarea = require('../models/tarea.model');
-const autenticarToken = require('../middleware/autenticacion');
-const validate = require('../middleware/validate');
-const { createTareaSchema, updateTareaSchema } = require('../validators/tarea.validator');
-const { checkReadPermission, checkEditPermission, checkCreatePermission } = require('../middleware/checkPermission');
 
-// Aplicar autenticación a todas las rutas
-router.use(autenticarToken);
+// 1. Cambiar al middleware en inglés desestructurando la propiedad
+const { authentication } = require('../middleware/authentication');
 
-// POST /api/tareas - Crear tarea
-router.post('/', validate(createTareaSchema), async (req, res) => {
-  try {
-    const { title, completed } = req.body;
+const taskController = require('../controllers/task.controller');
+const commentController = require('../controllers/comment.controller');
 
-    if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ error: 'Title es requerido' });
-    }
+// 2. Aplicar el middleware correcto a todas las rutas de este archivo
+router.use(authentication);
 
-    const tarea = new Tarea({
-      title: title.trim(),
-      completed: completed || false,
-      usuarioId: req.usuario.id
-    });
+// GET /api/tasks - Obtener tareas del usuario
+router.get('/', taskController.getTasks);
 
-    await tarea.save();
-    return res.status(201).json(tarea);
-  } catch (err) {
-    console.error('Error al crear tarea:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
+// PUT /api/tasks/:id - Actualizar tarea (ruta plana)
+router.put('/:id', taskController.updateTask);
 
-// GET /api/tareas - Obtener tareas del usuario
-router.get('/', async (req, res) => {
-  try {
-    const tareas = await Tarea.find({ usuarioId: req.usuario.id }).lean();
-    return res.json(tareas);
-  } catch (err) {
-    console.error('Error al obtener tareas:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
+// DELETE /api/tasks/:id - Eliminar tarea (ruta plana)
+router.delete('/:id', taskController.deleteTask);
 
-// GET /api/tareas/:id - Obtener una tarea
-router.get('/:id', checkReadPermission, async (req, res) => {
-  try {
-    return res.json(req.tarea);
-  } catch (err) {
-    console.error('Error al obtener tarea:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// PUT /api/tareas/:id - Actualizar tarea
-router.put('/:id', validate(updateTareaSchema), checkEditPermission, async (req, res) => {
-  try {
-    const { title, completed } = req.body;
-
-    const tarea = req.tarea;
-
-    if (title) {
-      tarea.title = title.trim();
-    }
-
-    if (completed !== undefined) {
-      tarea.completed = completed;
-    }
-
-    await tarea.save();
-    return res.json(tarea);
-  } catch (err) {
-    console.error('Error al actualizar tarea:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// DELETE /api/tareas/:id - Eliminar tarea
-router.delete('/:id', async (req, res) => {
-  try {
-    const tarea = await Tarea.findById(req.params.id);
-
-    if (!tarea) {
-      return res.status(404).json({ error: 'Tarea no encontrada' });
-    }
-
-    // Validar que el usuario sea propietario
-    if (tarea.usuarioId.toString() !== req.usuario.id) {
-      return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
-    }
-
-    await Tarea.findByIdAndDelete(req.params.id);
-    return res.status(204).send();
-  } catch (err) {
-    console.error('Error al eliminar tarea:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
+// Rutas de comentarios (anidadas bajo la tarea)
+router.get('/:tareaId/comments', commentController.getTaskComments);
+router.post('/:tareaId/comments', commentController.createComment);
+router.put('/:tareaId/comments/:commentId', commentController.updateComment);
+router.delete('/:tareaId/comments/:commentId', commentController.deleteComment);
 
 module.exports = router;

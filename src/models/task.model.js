@@ -6,7 +6,7 @@ const { encrypt, decrypt } = require('../security/encryption');
  * Si sensitive=true, la descripción se cifra con AES-256-GCM
  * Si sensitive=false, la descripción se almacena en plano
  */
-const tareaSchema = new mongoose.Schema({
+const taskSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
@@ -27,21 +27,38 @@ const tareaSchema = new mongoose.Schema({
     default: false,
     index: true
   },
-  usuarioId: {
+  userId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
+    ref: 'User',
     required: true,
     index: true
   },
   assignee: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
+    ref: 'User',
     default: null,
     index: true
   },
   projectId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Organization',
+    ref: 'Project',
+    default: null,
+    index: true
+  },
+  status: {
+    type: String,
+    enum: ['backlog', 'in_progress', 'review', 'done'],
+    default: 'backlog',
+    index: true
+  },
+  priority: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'medium',
+    index: true
+  },
+  dueDate: {
+    type: Date,
     default: null,
     index: true
   },
@@ -59,13 +76,13 @@ const tareaSchema = new mongoose.Schema({
 /**
  * Índices compuestos
  */
-tareaSchema.index({ projectId: 1, createdAt: -1 });
-tareaSchema.index({ usuarioId: 1, completed: 1 });
+taskSchema.index({ projectId: 1, createdAt: -1 });
+taskSchema.index({ userId: 1, completed: 1 });
 
 /**
  * Pre-save middleware para cifrar descripción si sensitive=true y actualizar updatedAt
  */
-tareaSchema.pre('save', function(next) {
+taskSchema.pre('save', function(next) {
   // Cifrar descripción si sensitive=true
   if (this.sensitive && this.description && !this.description.startsWith('base64:')) {
     try {
@@ -99,7 +116,7 @@ function decryptDescriptionIfSensitive(doc) {
   } else {
     if (doc.description && doc.sensitive) {
       try {
-        doc.description = decrypt(doc.description);
+        doc.description = decrypt(d.description);
       } catch (err) {
         console.error('Error al desencriptar descripción de tarea:', err.message);
       }
@@ -107,12 +124,12 @@ function decryptDescriptionIfSensitive(doc) {
   }
 }
 
-tareaSchema.post('find', decryptDescriptionIfSensitive);
-tareaSchema.post('findOne', decryptDescriptionIfSensitive);
-tareaSchema.post('findOneAndUpdate', decryptDescriptionIfSensitive);
-tareaSchema.post('findOneAndDelete', decryptDescriptionIfSensitive);
-tareaSchema.post('save', function(doc) {
+taskSchema.post('find', decryptDescriptionIfSensitive);
+taskSchema.post('findOne', decryptDescriptionIfSensitive);
+taskSchema.post('findOneAndUpdate', decryptDescriptionIfSensitive);
+taskSchema.post('findOneAndDelete', decryptDescriptionIfSensitive);
+taskSchema.post('save', function(doc) {
   decryptDescriptionIfSensitive(doc);
 });
 
-module.exports = mongoose.model('Tarea', tareaSchema);
+module.exports = mongoose.model('Task', taskSchema);

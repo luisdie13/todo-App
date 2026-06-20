@@ -1,290 +1,262 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getProject, getProjectTasks, createTask } from '../services/projectService';
-import { getUser } from '../services/tokenStorage';
+import api from '../config/axios.config';
+import { AuthContext } from '../context/AuthContext';
+import TaskModal from '../components/TaskModal';
+import KanbanBoard from '../components/KanbanBoard';
+import '../styles/Project.css';
 
-const Project = () => {
+function Project({ user, onLogout }) {
+  const [viewMode, setViewMode] = useState('table'); // 'table' o 'kanban'
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const user = getUser();
-
+  const { authLoading } = useContext(AuthContext); // ✅ NUEVO: Obtener authLoading del contexto
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [formData, setFormData] = useState({ title: '', description: '' });
-  const [submitting, setSubmitting] = useState(false);
-  const [userRole, setUserRole] = useState(null);
+  const [error, setError] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
 
+  // ✅ CRÍTICO: El useEffect ahora depende de [projectId, user, authLoading]
+  // De esta forma, cuando el usuario vuelve a estar disponible tras un refresh (F5),
+  // este efecto se ejecuta nuevamente y re-dispara la carga de datos
   useEffect(() => {
-    fetchProjectData();
-  }, [projectId]);
-
-  const fetchProjectData = async () => {
-    setLoading(true);
-    setError(null);
-
-    // Obtener datos del proyecto
-    const projectResult = await getProject(projectId);
-    if (projectResult.success) {
-      setProject(projectResult.project);
-      setUserRole(projectResult.userRole);
-    } else {
-      setError(projectResult.error);
-      setLoading(false);
+    // Si el estado global de autenticación todavía está cargando, o no hay usuario, espera.
+    if (authLoading || !user) {
+      console.log('⏳ [Project] Esperando autenticación... authLoading:', authLoading, 'user:', !!user);
       return;
     }
 
-    // Obtener tareas del proyecto
-    const tasksResult = await getProjectTasks(projectId);
-    if (tasksResult.success) {
-      setTasks(tasksResult.tareas);
-    } else {
-      setError(tasksResult.error);
-    }
+    loadProjectData();
+  }, [projectId, user, authLoading]);
 
-    setLoading(false);
+  const loadProjectData = async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      // Trae las tareas, detalles del proyecto y miembros en paralelo
+      const [tasksRes, projectRes, membersRes] = await Promise.all([
+        api.get(`/projects/${projectId}/tasks`),
+        api.get(`/projects/${projectId}`), // Detalles del proyecto
+        api.get(`/projects/${projectId}/members`) // Miembros de la organización
+      ]);
+
+      // Tu backend devuelve { success: true, project: {...} } para el proyecto
+      if (projectRes.data && projectRes.data.project) {
+        setProject(projectRes.data.project);
+      } else {
+        setProject({ name: 'Proyecto', _id: projectId });
+      }
+
+      setTasks(Array.isArray(tasksRes.data) ? tasksRes.data : []);
+      
+      // Cargar miembros de la organización
+      if (membersRes.data && Array.isArray(membersRes.data.members)) {
+        setMembers(membersRes.data.members);
+      } else if (Array.isArray(membersRes.data)) {
+        setMembers(membersRes.data);
+      } else {
+        setMembers([]);
+      }
+    } catch (err) {
+      console.error('Error cargando datos del proyecto:', err);
+      setError('Error cargando proyecto o no tienes acceso');
+      setTasks([]);
+      setMembers([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCreateTask = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
-    const result = await createTask(projectId, formData);
-
-    if (result.success) {
-      setFormData({ title: '', description: '' });
-      setShowCreateForm(false);
-      await fetchProjectData();
-    } else {
-      setError(result.error);
+  const handleCreateTask = async (data) => {
+    try {
+      const response = await api.post(`/projects/${projectId}/tasks`, data);
+      setTasks([...tasks, response.data.task || response.data]);
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        validationErrors: err.response?.data?.errors || {}
+      };
     }
-
-    setSubmitting(false);
   };
 
-  const canCreateTasks = userRole === 'project_admin' || userRole === 'developer';
-  const canEditTasks = userRole === 'project_admin' || userRole === 'developer';
+   const handleUpdateTask = async (taskId, data) => {
+     try {
+       // Esto enviará un PUT a http://localhost:3000/api/tasks/ID_DE_LA_TAREA
+       const response = await api.put(`/tasks/${taskId}`, data);
+       // Actualizar el array local de tareas con los datos actualizados del servidor
+       const updatedTask = response.data;
+       setTasks(tasks.map(t => t._id === taskId ? updatedTask : t));
+       return { success: true };
+     } catch (err) {
+       console.error('Error al actualizar tarea:', err);
+       return {
+         success: false,
+         validationErrors: err.response?.data?.errors || {}
+       };
+     }
+   };
+
+  const handleDeleteTask = async (taskId) => {
+    if (!window.confirm('¿Eliminar esta tarea?')) return;
+    try {
+      // Esto enviará un DELETE a http://localhost:3000/api/tasks/ID_DE_LA_TAREA
+      await api.delete(`/tasks/${taskId}`);
+      setTasks(tasks.filter(t => t._id !== taskId));
+    } catch (err) {
+      console.error('Error al eliminar tarea:', err);
+      alert('Error al eliminar');
+    }
+  };
+
+  const handleLogout = async () => {
+    const { logout } = await import('../services/authService');
+    await logout();
+    onLogout();
+    navigate('/login');
+  };
+
+  const filteredTasks = tasks.filter(task => {
+    if (statusFilter && task.status !== statusFilter) return false;
+    if (priorityFilter && task.priority !== priorityFilter) return false;
+    return true;
+  });
 
   if (loading) {
     return (
-      <div className="project-container">
-        <p>Cargando proyecto...</p>
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div className="project-container">
-        <p>{error || 'Proyecto no encontrado'}</p>
-        <button onClick={() => navigate('/dashboard')} className="btn-primary">
-          Volver al Dashboard
-        </button>
+      <div className="dashboard">
+        <div className="container">
+          <p className="text-muted">Cargando proyecto...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="project-container">
-      <div className="project-header">
-        <div className="project-title">
-          <h1>{project.nombre}</h1>
-          <span className={`badge badge-${project.estado}`}>{project.estado}</span>
-          <span className="user-role">{userRole}</span>
+    <div className="dashboard">
+      <div className="header">
+        <div>
+          <h1>🔒 SecureCollab</h1>
+          <p>Usuario: <strong>{user?.email || 'Usuario'}</strong></p>
         </div>
-        <button onClick={() => navigate('/dashboard')} className="btn-secondary">
-          ← Volver al Dashboard
+        <button className="btn btn-danger" onClick={handleLogout}>
+          🚪 Cerrar Sesión
         </button>
       </div>
 
-      {project.descripcion && (
-        <div className="project-description">
-          <p>{project.descripcion}</p>
+      <div className="container">
+        <div className="project-header">
+          <div>
+            <h2>{project?.name || 'Proyecto'}</h2>
+            <p className="breadcrumb">Dashboard {'\u003e'} Proyectos {'\u003e'} Tareas</p>
+          </div>
+          <button 
+            className="btn btn-primary"
+            onClick={() => {
+              setSelectedTask(null);
+              setShowModal(true);
+            }}
+          >
+            + Nueva tarea
+          </button>
         </div>
-      )}
 
-      <div className="project-info">
-        <p><strong>Creador:</strong> {project.creador.email}</p>
-        <p><strong>Miembros:</strong> {project.miembros.length}</p>
-      </div>
+        {error && <div className="alert alert-danger">{error}</div>}
 
-      {error && <div className="error-message">{error}</div>}
+        <div className="filters-section">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="filter-select">
+            <option value="">Estado ▼</option>
+            <option value="backlog">Backlog</option>
+            <option value="in_progress">In Progress</option>
+            <option value="review">Review</option>
+            <option value="done">Done</option>
+          </select>
 
-      <div className="tasks-section">
-        <div className="section-header">
-          <h2>Tareas del Proyecto ({tasks.length})</h2>
-          {canCreateTasks && (
-            <button
-              className="btn-primary"
-              onClick={() => setShowCreateForm(!showCreateForm)}
-            >
-              {showCreateForm ? 'Cancelar' : '+ Nueva Tarea'}
-            </button>
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="filter-select">
+            <option value="">Prioridad ▼</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+
+        <div className="tasks-table">
+          <div className="table-header">
+            <div className="col-title">Título</div>
+            <div className="col-status">Estado</div>
+            <div className="col-priority">Prioridad</div>
+            <div className="col-assignee">Asignado</div>
+            <div className="col-due">Vence</div>
+            <div className="col-actions">Acciones</div>
+          </div>
+
+          {filteredTasks.length === 0 ? (
+            <div className="table-empty">
+              <p>No hay tareas aún</p>
+            </div>
+          ) : (
+            filteredTasks.map((task, index) => (
+            <div key={task._id || `task-${index}`} className="table-row">
+                <div className="col-title">
+                  {task.sensitive && <span className="badge-sensitive">🔒 sensitive</span>}
+                  <span>{task.title}</span>
+                </div>
+                <div className="col-status">
+                  <span className={`status-badge status-${task.status}`}>{task.status}</span>
+                </div>
+                <div className="col-priority">
+                  <span className={`priority-dot priority-${task.priority}`}>●</span>
+                  <span>{task.priority}</span>
+                </div>
+                <div className="col-assignee">
+                  {task.assignee?.name || task.assignee?.email || 'No asignado'}
+                </div>
+                <div className="col-due">
+                  {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}
+                </div>
+                <div className="col-actions">
+                  <button 
+                    className="btn-link"
+                    onClick={() => {
+                      setSelectedTask(task);
+                      setShowModal(true);
+                    }}
+                  >
+                    ✏️ Editar
+                  </button>
+                  <button 
+                    className="btn-delete-action"
+                    onClick={() => handleDeleteTask(task._id)}
+                    title="Eliminar tarea"
+                  >
+                    🗑️ Eliminar
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
-
-        {showCreateForm && canCreateTasks && (
-          <form onSubmit={handleCreateTask} className="create-task-form">
-            <input
-              type="text"
-              placeholder="Título de la tarea"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              required
-              minLength="3"
-            />
-            <textarea
-              placeholder="Descripción (opcional)"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              rows="3"
-            />
-            <button type="submit" disabled={submitting} className="btn-primary">
-              {submitting ? 'Creando...' : 'Crear Tarea'}
-            </button>
-          </form>
-        )}
-
-        {tasks.length === 0 ? (
-          <p className="empty-state">
-            {canCreateTasks
-              ? 'No hay tareas aún. ¡Crea la primera tarea!'
-              : 'No hay tareas en este proyecto'}
-          </p>
-        ) : (
-          <div className="tasks-list">
-            {tasks.map((task) => (
-              <TaskCard
-                key={task._id}
-                task={task}
-                projectId={projectId}
-                canEdit={canEditTasks}
-                onUpdate={fetchProjectData}
-              />
-            ))}
-          </div>
-        )}
       </div>
+
+      <TaskModal
+        isOpen={showModal}
+        onClose={() => {
+          setShowModal(false);
+          setSelectedTask(null);
+        }}
+        onSubmit={selectedTask ? (data) => handleUpdateTask(selectedTask._id, data) : handleCreateTask}
+        task={selectedTask}
+        members={members}
+      />
     </div>
   );
-};
-
-/**
- * Componente de Tarjeta de Tarea
- */
-const TaskCard = ({ task, projectId, canEdit, onUpdate }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({ title: task.title, completed: task.completed });
-  const [updating, setUpdating] = useState(false);
-  const [error, setError] = useState(null);
-
-  const { updateTask, deleteTask } = require('../services/projectService');
-
-  const handleUpdateTask = async (e) => {
-    e.preventDefault();
-    setUpdating(true);
-    setError(null);
-
-    const result = await updateTask(projectId, task._id, editData);
-
-    if (result.success) {
-      setIsEditing(false);
-      await onUpdate();
-    } else {
-      setError(result.error);
-    }
-
-    setUpdating(false);
-  };
-
-  const handleDeleteTask = async () => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar esta tarea?')) {
-      const result = await deleteTask(projectId, task._id);
-      if (result.success) {
-        await onUpdate();
-      } else {
-        setError(result.error);
-      }
-    }
-  };
-
-  if (isEditing && canEdit) {
-    return (
-      <div className="task-card task-card-edit">
-        <form onSubmit={handleUpdateTask}>
-          <input
-            type="text"
-            value={editData.title}
-            onChange={(e) => setEditData({ ...editData, title: e.target.value })}
-            required
-            minLength="3"
-          />
-          <label>
-            <input
-              type="checkbox"
-              checked={editData.completed}
-              onChange={(e) => setEditData({ ...editData, completed: e.target.checked })}
-            />
-            Completada
-          </label>
-          {error && <p className="error">{error}</p>}
-          <div className="task-actions">
-            <button type="submit" disabled={updating} className="btn-primary">
-              {updating ? 'Guardando...' : 'Guardar'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsEditing(false);
-                setEditData({ title: task.title, completed: task.completed });
-              }}
-              className="btn-secondary"
-            >
-              Cancelar
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`task-card ${task.completed ? 'task-completed' : ''}`}>
-      <div className="task-header">
-        <h3 className={task.completed ? 'completed' : ''}>{task.title}</h3>
-        <span className={`task-status ${task.completed ? 'completed' : 'pending'}`}>
-          {task.completed ? '✓ Completada' : 'Pendiente'}
-        </span>
-      </div>
-      <p className="task-creator">Por: {task.usuarioId.email}</p>
-      <p className="task-date">
-        {new Date(task.createdAt).toLocaleDateString('es-ES', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        })}
-      </p>
-      {canEdit && (
-        <div className="task-actions">
-          <button
-            onClick={() => setIsEditing(true)}
-            className="btn-secondary"
-          >
-            ✏️ Editar
-          </button>
-          <button
-            onClick={handleDeleteTask}
-            className="btn-danger"
-          >
-            🗑️ Eliminar
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
+}
 
 export default Project;

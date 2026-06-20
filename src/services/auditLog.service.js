@@ -164,9 +164,9 @@ const obtenerPorEmail = async (email, limit = 10) => {
  */
 const logTaskEvent = async (evento, req, options = {}) => {
   try {
-    const ip = req.ip || req.connection.remoteAddress || 'unknown';
-    const userAgent = req.get('user-agent') || 'unknown';
-    const userId = req.usuario?.id || null;
+     const ip = req.ip || req.connection.remoteAddress || 'unknown';
+     const userAgent = req.get('user-agent') || 'unknown';
+     const userId = req.user?.id || null;
     
     // Construir detalles con información de la tarea
     const { taskId, projectId, taskTitle, action, reason } = options;
