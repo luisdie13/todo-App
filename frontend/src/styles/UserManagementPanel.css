@@ -1,0 +1,259 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   UserManagementPanel.css
+   Styles for the super_admin User Management panel.
+   Design language matches the existing AuditLogsPanel dark theme.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.user-management-panel {
+  background: #121212;
+  border-radius: 8px;
+  padding: 20px;
+  color: #e0e0e0;
+}
+
+.user-management-panel h2 {
+  color: #ffffff;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* ── Search bar ──────────────────────────────────────────────────────────── */
+.search-bar {
+  margin-bottom: 16px;
+}
+
+.search-bar input {
+  width: 100%;
+  max-width: 420px;
+  padding: 10px 14px;
+  background: #1f2833;
+  border: 1px solid #3a0007;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: #e50914;
+  box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.12);
+}
+
+.search-bar input::placeholder {
+  color: #666;
+}
+
+/* ── Users table ─────────────────────────────────────────────────────────── */
+.users-table {
+  background: #0b0c10;
+  border: 1px solid #3a0007;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.users-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.users-table thead {
+  background: #1a1a2e;
+  border-bottom: 2px solid #3a0007;
+}
+
+.users-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.users-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f1f1f;
+  color: #d0d0d0;
+  vertical-align: middle;
+}
+
+.users-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.users-table tbody tr:hover {
+  background-color: #1a1a2e;
+}
+
+/* ── Status badge ────────────────────────────────────────────────────────── */
+.status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.status-badge.active {
+  background-color: rgba(0, 200, 83, 0.15);
+  color: #00c853;
+  border: 1px solid rgba(0, 200, 83, 0.4);
+}
+
+.status-badge.inactive {
+  background-color: rgba(229, 9, 20, 0.12);
+  color: #ff4757;
+  border: 1px solid rgba(229, 9, 20, 0.35);
+}
+
+/* ── Role badge ──────────────────────────────────────────────────────────── */
+.role-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.role-badge.super-admin {
+  background-color: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+.role-badge.admin {
+  background-color: rgba(33, 150, 243, 0.15);
+  color: #2196f3;
+  border: 1px solid rgba(33, 150, 243, 0.35);
+}
+
+.role-badge.user {
+  background-color: rgba(158, 158, 158, 0.12);
+  color: #9e9e9e;
+  border: 1px solid rgba(158, 158, 158, 0.3);
+}
+
+/* ── Action buttons ──────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: opacity 0.15s, transform 0.1s;
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.btn:not(:disabled):hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.btn-danger {
+  background-color: #c62828;
+  color: #ffffff;
+}
+
+.btn-success {
+  background-color: #2e7d32;
+  color: #ffffff;
+}
+
+.btn-secondary {
+  background-color: #37474f;
+  color: #e0e0e0;
+}
+
+/* ── Pagination ──────────────────────────────────────────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 0 4px;
+  font-size: 13px;
+  color: #b0b0b0;
+}
+
+.pagination span {
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+/* ── Empty / loading states ──────────────────────────────────────────────── */
+.text-muted {
+  color: #7a7a7a;
+  font-style: italic;
+  padding: 32px;
+  text-align: center;
+}
+
+/* ── Alert ───────────────────────────────────────────────────────────────── */
+.alert {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  border-left: 4px solid;
+}
+
+.alert-danger {
+  background: rgba(229, 9, 20, 0.08);
+  border-left-color: #ff4757;
+  color: #ff4757;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .users-table th,
+  .users-table td {
+    padding: 10px 10px;
+  }
+
+  .users-table th:nth-child(2),   /* Name column */
+  .users-table td:nth-child(2) {
+    display: none;
+  }
+
+  .search-bar input {
+    max-width: 100%;
+  }
+
+  .pagination {
+    gap: 10px;
+    font-size: 12px;
+  }
+}

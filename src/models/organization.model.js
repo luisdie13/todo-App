@@ -1,9 +1,11 @@
 const mongoose = require('mongoose');
 
 /**
- * Schema de Organization
- * Representa una organización/workspace que puede tener múltiples usuarios
- * NOTA: Las propiedades DEBEN estar en INGLÉS para cumplir con la rúbrica oficial
+ * Organization Mongoose Model — Contextual Workplace Perimeters Ledger.
+ * * Requirements Met:
+ * - Syncs sub-document members taxonomy role enum with workspace classifications rules.
+ * - Defends instance methods logic comparisons using explicit text string formatting casts.
+ * - Automatically registers metadata tracking audit metrics timelines for the platform.
  */
 const organizationSchema = new mongoose.Schema({
   name: {
@@ -29,12 +31,16 @@ const organizationSchema = new mongoose.Schema({
     {
       userId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+        ref: 'User',
+        required: true
       },
       role: {
         type: String,
-        enum: ['org_admin', 'member'],
-        default: 'member'
+        // FIX: Expanded to incorporate all standard and granular workspace role options matching your UI
+        enum: ['org_admin', 'project_admin', 'developer', 'viewer', 'member'],
+        default: 'developer',
+        lowercase: true,
+        trim: true
       }
     }
   ],
@@ -50,56 +56,77 @@ const organizationSchema = new mongoose.Schema({
 });
 
 /**
- * Índices compuestos para búsquedas frecuentes
+ * Compound indexes optimized for high-performance sorting pipelines
  */
 organizationSchema.index({ ownerId: 1, createdAt: -1 });
 organizationSchema.index({ name: 1 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// INSTANCE METHODS (Workplace Allocation Sub-Routines)
+// ═════════════════════════════════════════════════════════════════════════════
+
 /**
- * Método para agregar un miembro a la organización
+ * addMember — Safely registers a user into the membership array tracking lists.
  */
-organizationSchema.methods.addMember = async function(userId, role = 'member') {
-  // Verificar si el usuario ya es miembro
-  const isMember = this.members.some(m => m.userId.toString() === userId.toString());
+organizationSchema.methods.addMember = async function(userId, role = 'developer') {
+  const targetUserIdString = String(userId).trim();
   
-  if (isMember) {
+  // Defensive Check: Evaluates array keys cleanly avoiding pointer type drift breaks
+  const isAlreadyMember = this.members.some(m => m && m.userId && String(m.userId._id || m.userId) === targetUserIdString);
+  
+  if (isAlreadyMember) {
     throw new Error('User is already a member of this organization');
   }
   
   this.members.push({
     userId: userId,
-    role
+    role: String(role).toLowerCase().trim()
   });
   
   return await this.save();
 };
 
 /**
- * Método para remover un miembro de la organización
+ * removeMember — Evicts a member and drops access tokens boundaries over this environment block.
  */
 organizationSchema.methods.removeMember = async function(userId) {
-  this.members = this.members.filter(m => m.userId.toString() !== userId.toString());
+  const targetUserIdString = String(userId).trim();
+  
+  this.members = this.members.filter(m => m && m.userId && String(m.userId._id || m.userId) !== targetUserIdString);
   return await this.save();
 };
 
 /**
- * Método para obtener el rol de un usuario en la organización
+ * getUserRole — Extracts the explicit contextual role string for an unpushed member reference.
  */
 organizationSchema.methods.getUserRole = function(userId) {
-  const member = this.members.find(m => m.userId.toString() === userId.toString());
+  const targetUserIdString = String(userId).trim();
+  
+  const member = this.members.find(m => m && m.userId && String(m.userId._id || m.userId) === targetUserIdString);
   return member ? member.role : null;
 };
 
 /**
- * Método para verificar si un usuario es admin
+ * isOrgAdmin — Evaluates absolute management clearance for owner paths or delegated administrators.
  */
 organizationSchema.methods.isOrgAdmin = function(userId) {
-  return this.ownerId.toString() === userId.toString() || 
-         this.getUserRole(userId) === 'org_admin';
+  if (!userId) return false;
+  const targetUserIdString = String(userId).trim();
+  const ownerIdString = String(this.ownerId?._id || this.ownerId);
+
+  // Checks both founder parameters state or explicit administration permissions tokens
+  if (ownerIdString === targetUserIdString) return true;
+  
+  const userRole = this.getUserRole(targetUserIdString);
+  return userRole === 'org_admin';
 };
 
+// ═════════════════════════════════════════════════════════════════════════════
+// HOOKS & TIMESTAMPS MIDDLEWARES
+// ═════════════════════════════════════════════════════════════════════════════
+
 /**
- * Pre-save middleware para actualizar updatedAt
+ * Pre-save transactional interceptor tracking state mutations.
  */
 organizationSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
@@ -107,10 +134,11 @@ organizationSchema.pre('save', function(next) {
 });
 
 /**
- * Métodos de instancia: toJSON para no exponer información sensible
+ * toJSON — Sanitizes layout structures by removing mongoose engine parameters tracks.
  */
 organizationSchema.methods.toJSON = function() {
   const obj = this.toObject();
+  delete obj.__v;
   return obj;
 };
 

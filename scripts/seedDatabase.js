@@ -135,14 +135,15 @@ async function seedDatabase() {
     // =============== CREAR PROYECTOS EN ORGANIZACIÓN A ===============
     console.log('\n📊 Creando proyectos para Organización A...');
     
-    // Proyecto 1: Internal, Active
-    const project1 = new Project({
-      name: 'Project 1 - Internal Active',
-      description: 'Proyecto interno activo para validar permisos',
-      organizationId: orgA._id,
-      ownerId: user2._id,
-      estado: 'activo'
-    });
+     // Proyecto 1: Internal, Active
+     const project1 = new Project({
+       name: 'Project 1 - Internal Active',
+       description: 'Proyecto interno activo para validar permisos',
+       organizationId: orgA._id,
+       ownerId: user2._id,
+       status: 'active',
+       visibility: 'internal'
+     });
     await project1.save();
     console.log(`✅ Proyecto 1 creado: ${project1.name} (estado: activo)`);
 
@@ -185,7 +186,8 @@ async function seedDatabase() {
       description: 'Proyecto privado solo accesible por project_admin',
       organizationId: orgA._id,
       ownerId: user2._id,
-      estado: 'activo'
+      status: 'active',
+      visibility: 'private'
     });
     await project2.save();
     console.log(`✅ Proyecto 2 creado: ${project2.name} (estado: activo)`);
@@ -205,7 +207,8 @@ async function seedDatabase() {
       description: 'Proyecto archivado para validar restricciones',
       organizationId: orgA._id,
       ownerId: user2._id,
-      estado: 'archivado'
+      status: 'archived',
+      visibility: 'internal'
     });
     await project3.save();
     console.log(`✅ Proyecto 3 creado: ${project3.name} (estado: archivado)`);
@@ -232,6 +235,35 @@ async function seedDatabase() {
     await orgB.save();
     console.log(`✅ Organización B creada: ${orgB.name}`);
     console.log(`   - Owner: ${user9.email}`);
+
+    // =============== CREAR TAREAS EN PROYECTO 1 ===============
+    console.log('\n📝 Creando tareas para Proyecto 1...');
+
+    // Tarea 1: Normal (sin cifrar)
+    const task1 = new Task({
+      title: 'Tarea 1 - Normal Task',
+      description: 'Esta es una tarea normal sin información sensible',
+      sensitive: false,
+      userId: user6._id,
+      assignee: user6._id,
+      projectId: project1._id,
+      status: 'backlog'
+    });
+    await task1.save();
+    console.log(`✅ Tarea 1 creada: ${task1.title} (sensitive: false)`);
+
+    // Tarea 2: Sensible (cifrada)
+    const task2 = new Task({
+      title: 'Tarea 2 - Sensitive Task',
+      description: 'Información confidencial que será cifrada automáticamente',
+      sensitive: true,
+      userId: user6._id,
+      assignee: user6._id,
+      projectId: project1._id,
+      status: 'backlog'
+    });
+    await task2.save();
+    console.log(`✅ Tarea 2 creada: ${task2.title} (sensitive: true, descripción cifrada)`);
 
     // =============== RESUMEN FINAL ===============
     console.log('\n' + '='.repeat(70));

@@ -1,8 +1,11 @@
 const mongoose = require('mongoose');
 
 /**
- * Schema de Membership
- * Representa la pertenencia de un usuario a un proyecto/organización con un rol específico
+ * Membership Mongoose Model — Project-Level Contextual Access Ledger.
+ * * Requirements Met:
+ * - Maps user identities to specific projects alongside restricted execution roles.
+ * - Enforces index constraints preventing duplicate member registration configurations.
+ * - Outlines clean predicate utility instance methods to accelerate ABAC guard verifications.
  */
 const membershipSchema = new mongoose.Schema({
   userId: {
@@ -30,37 +33,61 @@ const membershipSchema = new mongoose.Schema({
 });
 
 /**
- * Índice compuesto único: {userId: 1, projectId: 1}
- * Asegura que un usuario no pueda tener múltiples membresías en el mismo proyecto
+ * Unique Compound Index
+ * Enforces absolute database consistency: an individual actor can only occupy one 
+ * access context slot configuration per project perimeter block.
  */
 membershipSchema.index({ userId: 1, projectId: 1 }, { unique: true });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// INSTANCE METHODS (ABAC Context Predicates)
+// ═════════════════════════════════════════════════════════════════════════════
+
 /**
- * Método para verificar si el usuario tiene un rol específico
+ * hasRole — Verifies if the instance matches a targeted role taxonomy string.
  */
 membershipSchema.methods.hasRole = function(role) {
   return this.role === role;
 };
 
 /**
- * Método para verificar si el usuario tiene al menos un rol de administrador
+ * isAdmin — Verification checkpoint confirming if the subject holds project-level admin clearance.
  */
 membershipSchema.methods.isAdmin = function() {
   return this.role === 'project_admin';
 };
 
 /**
- * Método para verificar si el usuario tiene permisos de escritura
+ * canWrite — Evaluates write permission privileges (Enforces Rule 4 Read-Only bypass for Viewers).
  */
 membershipSchema.methods.canWrite = function() {
   return this.role === 'project_admin' || this.role === 'developer';
 };
 
 /**
- * Método para verificar si el usuario tiene permisos de lectura
+ * canRead — Evaluates broad reading data visibility rights across the targeted project perimeter.
  */
 membershipSchema.methods.canRead = function() {
-  return this.role === 'project_admin' || this.role === 'developer' || this.role === 'viewer';
+  return ['project_admin', 'developer', 'viewer'].includes(this.role);
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LIFECYCLE HOOKS & TRANSFORMS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * toJSON — Intercepts payload serialization to standardize outbound response mapping structures.
+ */
+membershipSchema.methods.toJSON = function() {
+  const obj = this.toObject();
+  if (obj.userId && obj.userId._id) {
+    obj.user = obj.userId;
+  }
+  if (obj.projectId && obj.projectId._id) {
+    obj.project = obj.projectId;
+  }
+  delete obj.__v;
+  return obj;
 };
 
 module.exports = mongoose.model('Membership', membershipSchema);

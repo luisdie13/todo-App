@@ -1,43 +1,56 @@
+const mongoose = require('mongoose');
 const Project = require('../models/project.model');
 const Organization = require('../models/organization.model');
 const Membership = require('../models/membership.model');
 const auditLogService = require('../services/auditLog.service');
 
 /**
+ * project.controller.js — Secure Project Workspace Controller Engine.
+ * * Requirements Met:
+ * - Unifies operational output keys into strict professional English fields ('message', 'status').
+ * - Plugs into Class 10 Audit Logging pipelines using standard logTaskEvent tracking metrics.
+ * - Sanitizes param addresses to fully prevent structure-mismatch NoSQL Injection anomalies.
+ */
+
+/**
  * GET /api/projects
- * Obtiene todos los proyectos del usuario actual (creados y donde es miembro)
+ * Retrieves all projects linked to the active identity profile context (Owned + Assigned Memberships).
  */
 const getMyProjects = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication Error: Verified user instance payload missing.' });
+    }
 
-    // Obtener proyectos creados por el usuario
-    const createdProjects = await Project.find({ ownerId: userId })
-      .populate('ownerId', 'email')
+    const userObjectId = new mongoose.Types.ObjectId(String(currentUserId).trim());
+
+    // Fetch project registries created directly by the authenticated operator context
+    const createdProjects = await Project.find({ ownerId: userObjectId })
+      .populate('ownerId', 'email name')
       .populate('organizationId', 'name')
       .sort({ createdAt: -1 })
       .lean();
 
-    // Obtener proyectos donde el usuario es miembro (a través de Membership)
-    const memberships = await Membership.find({ userId })
+    // Query explicit memberships where the actor has been injected by an administrator
+    const memberships = await Membership.find({ userId: userObjectId })
       .select('projectId')
       .lean();
 
     const memberProjectIds = memberships.map(m => m.projectId);
 
     const memberProjects = memberProjectIds.length > 0
-      ? await Project.find({ _id: { $in: memberProjectIds }, ownerId: { $ne: userId } })
-          .populate('ownerId', 'email')
+      ? await Project.find({ _id: { $in: memberProjectIds }, ownerId: { $ne: userObjectId } })
+          .populate('ownerId', 'email name')
           .populate('organizationId', 'name')
           .sort({ createdAt: -1 })
           .lean()
       : [];
 
-    // Combinar y eliminar duplicados
-    const allProjects = [...createdProjects, ...memberProjects];
+    // Deduplicate array logs references through atomic string index mapping hash
     const projectMap = new Map();
-    allProjects.forEach(p => {
-      projectMap.set(p._id.toString(), p);
+    [...createdProjects, ...memberProjects].forEach(p => {
+      if (p && p._id) projectMap.set(String(p._id), p);
     });
 
     const projects = Array.from(projectMap.values());
@@ -49,111 +62,107 @@ const getMyProjects = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener mis proyectos:', err.message);
+    console.error('[ProjectController] Error fetching personal projects context grid:', err.message);
     next(err);
   }
 };
 
 /**
  * POST /api/organizations/:organizationId/projects
- * Crea un nuevo proyecto dentro de una organización
+ * Provisions a fresh project boundary target within an organization container.
  */
 const createProject = async (req, res, next) => {
   try {
-    const { organizationId } = req.params;
+    const organizationId = String(req.params.organizationId).trim();
     const { name, description } = req.body;
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Validar entrada
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return res.status(400).json({ error: 'El nombre del proyecto es requerido' });
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Validation Error: Project designation name string is required.' });
     }
 
-    // Verificar que la organización existe
     const organization = await Organization.findById(organizationId);
     if (!organization) {
-      return res.status(404).json({ error: 'Organización no encontrada' });
+      return res.status(404).json({ error: 'Target workspace organization record not located.' });
     }
 
-     // Verificar acceso (crear o admin)
-     // PROTECCIÓN DEFENSIVA: Validar que ownerId existe
-      const orgOwnerId = organization.ownerId;
-      if (!orgOwnerId) {
-        console.error('ERROR: Missing organization.ownerId in createProject');
-        return res.status(500).json({ error: 'Datos de organización corrompidos' });
-      }
-      const isCreator = orgOwnerId.toString?.() === userId || orgOwnerId === userId;
-      const isAdmin = organization.isOrgAdmin?.(userId) || false;
-    
-    if (!isCreator && !isAdmin) {
-      return res.status(403).json({ error: 'No tienes permiso para crear proyectos en esta organización' });
+    const orgOwnerId = organization.ownerId || organization.orgOwnerId;
+    if (!orgOwnerId) {
+      return res.status(500).json({ error: 'System Integrity Error: Parent organization ownership parameters corrupted.' });
     }
 
-     // Crear proyecto
-     const project = new Project({
-       name: name.trim(),
-       description: description ? description.trim() : null,
-       organizationId,
-       ownerId: userId
-     });
+    const isCreator = String(orgOwnerId) === String(currentUserId);
+    // Explicit runtime structural checks against instance helper methods
+    const isAdmin = typeof organization.isOrgAdmin === 'function' ? organization.isOrgAdmin(currentUserId) : false;
+    const isSuperAdmin = req.user?.role === 'super_admin';
 
-     await project.save();
-     await project.populate('ownerId', 'email');
+    if (!isCreator && !isAdmin && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: You lack administrative permissions inside this organization boundary.' });
+    }
 
-    // Registrar en auditoría
+    const project = new Project({
+      name: String(name).trim(),
+      description: description ? String(description).trim() : null,
+      organizationId: organizationId,
+      ownerId: currentUserId,
+      status: 'active' // Correctly initialised to official schema field state
+    });
+
+    await project.save();
+    await project.populate('ownerId', 'email name');
+
+    // Clase 10 Audit Logging Integration — Injects metadata cleanly to ledger
     await auditLogService.logTaskEvent('project.created', req, {
       projectId: project._id,
       organizationId,
-      projectName: project.name
+      projectName: project.name,
+      status: 'success'
     });
 
+    // FIX: Changed 'mensaje' to 'message' to satisfy frontend notification triggers
     return res.status(201).json({
-      mensaje: 'Proyecto creado exitosamente',
+      message: 'Project pipeline target deployed successfully.',
       project
     });
 
   } catch (err) {
-    console.error('Error al crear proyecto:', err.message);
+    console.error('[ProjectController] Project creation sequence aborted:', err.message);
     next(err);
   }
 };
 
 /**
  * GET /api/organizations/:organizationId/projects
- * Obtiene todos los proyectos de una organización
+ * Retrieves all sub-project targets associated with a single organization ID address.
  */
 const getOrganizationProjects = async (req, res, next) => {
   try {
-    const { organizationId } = req.params;
-    const userId = req.user.id;
+    const organizationId = String(req.params.organizationId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Verificar que la organización existe
     const organization = await Organization.findById(organizationId);
     if (!organization) {
-      return res.status(404).json({ error: 'Organización no encontrada' });
+      return res.status(404).json({ error: 'Target organization context not located.' });
     }
 
-    // Verificar acceso
-    // PROTECCIÓN DEFENSIVA: Validar que ownerId existe
-    const orgOwnerId = organization.ownerId;
+    const orgOwnerId = organization.ownerId || organization.orgOwnerId;
     if (!orgOwnerId) {
-      console.error('ERROR: Missing organization.ownerId in getOrganizationProjects');
-      return res.status(500).json({ error: 'Datos de organización corrompidos' });
+      return res.status(500).json({ error: 'System Integrity Error: Workspace ownership records corrupted.' });
     }
-    const isCreator = orgOwnerId.toString?.() === userId || orgOwnerId === userId;
+
+    const isCreator = String(orgOwnerId) === String(currentUserId);
     const isMember = organization.members?.some(m => {
       if (!m.userId) return false;
-      const memberUserId = m.userId._id ? m.userId._id.toString?.() : m.userId.toString?.();
-      return memberUserId === userId;
+      return String(m.userId._id || m.userId) === String(currentUserId);
     }) || false;
-    
-    if (!isCreator && !isMember) {
-      return res.status(403).json({ error: 'No tienes acceso a esta organización' });
+    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    if (!isCreator && !isMember && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: Enforced context parameters restrict viewing this environment list.' });
     }
 
-    // Obtener proyectos
     const projects = await Project.find({ organizationId })
-      .populate('ownerId', 'email')
+      .populate('ownerId', 'email name')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -164,133 +173,66 @@ const getOrganizationProjects = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener proyectos:', err.message);
+    console.error('[ProjectController] Error querying organization associated projects:', err.message);
     next(err);
   }
 };
 
 /**
  * GET /api/projects/:projectId
- * Obtiene un proyecto específico
+ * Resolves precise details and applies cryptographic description parsing if active.
  */
 const getProject = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
     const { decrypt } = require('../security/encryption');
 
-    // Obtener proyecto con populate para ownerId y organizationId (con su ownerId anidado)
     const project = await Project.findById(projectId)
-      .populate('ownerId', 'email')
+      .populate('ownerId', 'email name')
       .populate({
         path: 'organizationId',
-        select: 'ownerId members',
-        populate: { 
-          path: 'ownerId', 
-          select: 'email' 
-        }
+        select: 'ownerId members name',
+        populate: { path: 'ownerId', select: 'email name' }
       });
 
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Target project pipeline record not located.' });
     }
 
-    // Verificar acceso - Protección defensiva contra undefined
     const organization = project.organizationId;
-    
-    // Validación defensiva: si organization no existe, retornar error
     if (!organization) {
-      console.error('❌ ERROR CRÍTICO: Organización no encontrada para proyecto:', projectId);
-      return res.status(404).json({ error: 'Organización del proyecto no encontrada' });
+      return res.status(444).json({ error: 'Structural Fault: Project parent organization perimeter missing.' });
     }
 
-    // PROTECCIÓN DEFENSIVA: Extraer ownerId del proyecto con múltiples fallbacks
-    // Soporta campos: ownerId (ref), _id dentro de ownerId, y fallback a creador
-    let pOwnerId = null;
-    
-    if (project.ownerId) {
-      // Si ownerId es un objeto poblado, extraer _id
-      if (project.ownerId._id) {
-        pOwnerId = project.ownerId._id.toString();
-      } 
-      // Si ownerId es un ObjectId directo
-      else if (typeof project.ownerId.toString === 'function') {
-        pOwnerId = project.ownerId.toString();
-      } 
-      // Si ownerId es una cadena
-      else {
-        pOwnerId = project.ownerId;
-      }
-    } 
-    // Fallback a campo antiguo 'creador' si existe
-    else if (project.creador) {
-      if (project.creador._id) {
-        pOwnerId = project.creador._id.toString();
-      } else if (typeof project.creador.toString === 'function') {
-        pOwnerId = project.creador.toString();
-      } else {
-        pOwnerId = project.creador;
-      }
-    }
+    // Secure fallback parser to isolate owner references cleanly
+    const pOwnerId = project.ownerId?._id || project.ownerId || project.creador?._id || project.creador;
+    const orgOwnerId = organization.ownerId?._id || organization.ownerId || organization.creador?._id || organization.creador;
 
-    // PROTECCIÓN DEFENSIVA: Extraer ownerId de la organización
-    let orgOwnerId = null;
-    
-    if (organization.ownerId) {
-      if (organization.ownerId._id) {
-        orgOwnerId = organization.ownerId._id.toString();
-      } else if (typeof organization.ownerId.toString === 'function') {
-        orgOwnerId = organization.ownerId.toString();
-      } else {
-        orgOwnerId = organization.ownerId;
-      }
-    } 
-    else if (organization.creador) {
-      if (organization.creador._id) {
-        orgOwnerId = organization.creador._id.toString();
-      } else if (typeof organization.creador.toString === 'function') {
-        orgOwnerId = organization.creador.toString();
-      } else {
-        orgOwnerId = organization.creador;
-      }
-    }
-
-    // Log detallado para debugging
-    console.log(`🔍 [getProject] Validando acceso para usuario ${userId}`);
-    console.log(`   - projectOwnerId: ${pOwnerId || 'UNDEFINED'}`);
-    console.log(`   - organizationOwnerId: ${orgOwnerId || 'UNDEFINED'}`);
-
-    // AJUSTE DE FALLBACK: Si falta el ownerId del proyecto, usar el de la organización
-    if (!pOwnerId && orgOwnerId) {
-      console.warn(`⚠️ AJUSTE DE FALLBACK: project.ownerId undefined, usando organizationOwnerId`);
-      pOwnerId = orgOwnerId;
-      project.ownerId = organization.ownerId;
-    }
-
-    // Verificar acceso con lógica defensiva
-    const isCreator = pOwnerId && pOwnerId === userId;
-    const isOrgCreator = orgOwnerId && orgOwnerId === userId;
+    const isCreator = pOwnerId && String(pOwnerId) === String(currentUserId);
+    const isOrgCreator = orgOwnerId && String(orgOwnerId) === String(currentUserId);
     const isOrgMember = organization.members?.some(m => {
       if (!m.userId) return false;
-      const memberUserId = m.userId?._id?.toString() || m.userId?.toString();
-      return memberUserId === userId;
+      return String(m.userId._id || m.userId) === String(currentUserId);
     }) || false;
-    
-    console.log(`   - isCreator: ${isCreator}, isOrgCreator: ${isOrgCreator}, isOrgMember: ${isOrgMember}`);
-    
-    if (!isCreator && !isOrgCreator && !isOrgMember) {
-      return res.status(403).json({ error: 'No tienes acceso a este proyecto' });
+    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    if (!isCreator && !isOrgCreator && !isOrgMember && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: Absolute isolation rule prevents opening this project target.' });
     }
 
-    // Desencriptar descripción si existe
     const projectObj = project.toObject();
+    
+    // Aligns response variables to uniform English field naming criteria rules
+    projectObj.status = projectObj.status || projectObj.estado || 'active';
+
+    // Decrypt fields records cleanly if encrypted at rest (OWASP Mitigation Rule 6)
     if (projectObj.description) {
       try {
         projectObj.description = decrypt(projectObj.description);
       } catch (err) {
-        console.error('Error desencriptando descripción:', err.message);
-        // No lanzar error, permitir que se retorne el proyecto sin descripción
-        projectObj.description = null;
+        console.error('[ProjectController] Cryptographic description parsing failure:', err.message);
+        projectObj.description = null; // Yield text node parameter safe fallback
       }
     }
 
@@ -300,140 +242,118 @@ const getProject = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener proyecto:', err.message);
+    console.error('[ProjectController] Error resolving precise project metadata:', err.message);
     next(err);
   }
 };
 
 /**
  * PUT /api/projects/:projectId
- * Actualiza un proyecto
+ * Mutates name and summaries details properties under strict ownership context.
  */
 const updateProject = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
+    const projectId = String(req.params.projectId).trim();
     const { name, description } = req.body;
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener proyecto
-    const project = await Project.findById(projectId)
-      .populate('ownerId', 'email');
-    
+    const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project configuration profile not located.' });
     }
 
-    // LÓGICA DEFENSIVA: Manejar campos mixtos (ownerId/creador)
-    const pOwnerId = project.ownerId?._id?.toString() || project.ownerId?.toString() || project.creador;
-    
+    const pOwnerId = project.ownerId?._id || project.ownerId || project.creador;
     if (!pOwnerId) {
-      console.error(`❌ ERROR CRÍTICO: project.ownerId es undefined { projectOwnerId: 'UNDEFINED' }`);
-      return res.status(500).json({ error: 'Datos del propietario del proyecto corrompidos' });
+      return res.status(500).json({ error: 'System Integrity Error: Ownership identity strings corrupted.' });
     }
 
-    // Verificar permisos (creador) con lógica defensiva
-    if (pOwnerId !== userId) {
-      return res.status(403).json({ error: 'No tienes permiso para actualizar este proyecto' });
+    if (String(pOwnerId) !== String(currentUserId) && req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Mutation request dropped. Creator scope metrics required.' });
     }
 
-    // Actualizar campos
     if (name) {
-      if (name.trim().length < 3) {
-        return res.status(400).json({ error: 'El nombre debe tener al menos 3 caracteres' });
+      if (String(name).trim().length < 3) {
+        return res.status(400).json({ error: 'Validation Error: Designation name must span across at least 3 characters.' });
       }
-      project.name = name.trim();
+      project.name = String(name).trim();
     }
 
     if (description !== undefined) {
-      project.description = description ? description.trim() : null;
+      project.description = description ? String(description).trim() : null;
     }
 
     await project.save();
-    await project.populate('ownerId', 'email');
+    await project.populate('ownerId', 'email name');
 
-    // Registrar en auditoría
     await auditLogService.logTaskEvent('project.updated', req, {
       projectId,
-      projectName: project.name
+      projectName: project.name,
+      status: 'success'
     });
 
     return res.status(200).json({
-      mensaje: 'Proyecto actualizado exitosamente',
+      message: 'Project boundary specifications adjusted successfully.',
       project
     });
 
   } catch (err) {
-    console.error('Error al actualizar proyecto:', err.message);
+    console.error('[ProjectController] Operational project patch routine aborted:', err.message);
     next(err);
   }
 };
 
 /**
  * DELETE /api/projects/:projectId
- * Elimina un proyecto
+ * Purges project assets and references cleanly from MongoDB storage.
  */
 const deleteProject = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener proyecto
-    const project = await Project.findById(projectId)
-      .populate('ownerId', 'email');
-    
+    const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project registry reference target not found.' });
     }
 
-    // LÓGICA DEFENSIVA: Manejar campos mixtos (ownerId/creador)
-    const pOwnerId = project.ownerId?._id?.toString() || project.ownerId?.toString() || project.creador;
-    
-    if (!pOwnerId) {
-      console.error(`❌ ERROR CRÍTICO: project.ownerId es undefined { projectOwnerId: 'UNDEFINED' }`);
-      return res.status(500).json({ error: 'Datos del propietario del proyecto corrompidos' });
+    const pOwnerId = project.ownerId?._id || project.ownerId || project.creador;
+    if (String(pOwnerId) !== String(currentUserId) && req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Destruction routines are locked to the asset creator.' });
     }
 
-    // Verificar permisos (creador) con lógica defensiva
-    if (pOwnerId !== userId) {
-      return res.status(403).json({ error: 'No tienes permiso para eliminar este proyecto' });
-    }
-
-    // Eliminar proyecto y sus tareas
+    const cachedProjectName = project.name;
     await Project.findByIdAndDelete(projectId);
 
-    // Registrar en auditoría
     await auditLogService.logTaskEvent('project.deleted', req, {
       projectId,
-      projectName: project.name
+      projectName: cachedProjectName,
+      status: 'success'
     });
 
     return res.status(200).json({
-      mensaje: 'Proyecto eliminado exitosamente'
+      message: 'Project environment entity purged from active registries logs.'
     });
 
   } catch (err) {
-    console.error('Error al eliminar proyecto:', err.message);
+    console.error('[ProjectController] Destructive drop sequence execution crashed:', err.message);
     next(err);
   }
 };
 
 /**
  * PUT /api/projects/:projectId/archive
- * Archiva un proyecto (solo lectura a partir de entonces)
+ * Enforces Rule 4 ABAC context locks: Seals project into a Read-Only perimeter block.
  */
 const archiveProject = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
     const { ABACContext, abacEngine } = require('../policies/abac.policy');
 
-    // Obtener proyecto
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project context target profile not found.' });
     }
 
-    // Crear contexto ABAC
     const context = new ABACContext({
       usuario: req.user,
       recurso: 'project',
@@ -441,136 +361,126 @@ const archiveProject = async (req, res, next) => {
       proyecto: project
     });
 
-    // Evaluar política
     const permitido = await abacEngine.evaluate(context);
-
     if (!permitido) {
       await auditLogService.logTaskEvent('access.denied', req, {
         recurso: 'project',
         accion: 'archive',
         projectId,
-        reason: 'Usuario no tiene permiso para archivar este proyecto'
+        reason: 'Enforced ABAC rules rejected project lock execution due to unauthorized role metrics.'
       });
-      return res.status(403).json({ error: 'No tienes permiso para archivar este proyecto' });
+      return res.status(403).json({ error: 'Access Denied: Insufficient authorization parameters to archive this target.' });
     }
 
-    // Archivar proyecto
-    project.estado = 'archivado';
+    // FIX: Swapped Spanish '.estado' field to schema compliant English '.status' model key
+    project.status = 'archived';
     await project.save();
-    await project.populate('ownerId', 'email');
+    await project.populate('ownerId', 'email name');
 
-    // Registrar en auditoría
     await auditLogService.logTaskEvent('project.archived', req, {
       projectId,
-      projectName: project.name
+      projectName: project.name,
+      status: 'success'
     });
 
     return res.status(200).json({
-      mensaje: 'Proyecto archivado exitosamente',
+      message: 'Project pipeline locked and archived successfully into read-only mode.',
       project
     });
 
   } catch (err) {
-    console.error('Error al archivar proyecto:', err.message);
+    console.error('[ProjectController] Project lock sequence aborted:', err.message);
     next(err);
   }
 };
 
 /**
  * PUT /api/projects/:projectId/unarchive
- * Desarchiva un proyecto
+ * Restores and reactivates a frozen read-only project pipeline target.
  */
 const unarchiveProject = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener proyecto
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project profile target reference not found.' });
     }
 
-    // Verificar permisos (creador o super_admin)
-    const isSuperAdmin = req.user.rol === 'super_admin';
-    const isCreator = project.ownerId.toString() === userId;
+    // FIX: Corrected English string property selector rule checking (role instead of rol)
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    const isCreator = String(project.ownerId) === String(currentUserId);
 
     if (!isCreator && !isSuperAdmin) {
-      return res.status(403).json({ error: 'No tienes permiso para desarchivar este proyecto' });
+      return res.status(403).json({ error: 'Access Denied: Reversal activation routines are locked to admins.' });
     }
 
-    // Desarchivar proyecto
-    project.estado = 'activo';
+    project.status = 'active'; // Reset status tag to active model value
     await project.save();
-    await project.populate('ownerId', 'email');
+    await project.populate('ownerId', 'email name');
 
-    // Registrar en auditoría
     await auditLogService.logTaskEvent('project.unarchived', req, {
       projectId,
-      projectName: project.name
+      projectName: project.name,
+      status: 'success'
     });
 
     return res.status(200).json({
-      mensaje: 'Proyecto desarchivado exitosamente',
+      message: 'Project pipeline successfully restored to active status.',
       project
     });
 
   } catch (err) {
-    console.error('Error al desarchivar proyecto:', err.message);
+    console.error('[ProjectController] Error unlocking project pipeline environment:', err.message);
     next(err);
   }
 };
 
 /**
  * GET /api/projects/:projectId/members
- * Obtiene los miembros de la organización asociada al proyecto
- * Retorna un array de usuarios que pertenecen a la organización
+ * Resolves valid organization member indexes bound to a project context scope.
  */
 const getProjectMembers = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener proyecto
-    const project = await Project.findById(projectId)
-      .populate('organizationId');
-
+    const project = await Project.findById(projectId).populate('organizationId');
     if (!project) {
-      return res.status(404).json({ error: 'Proyecto no encontrado' });
+      return res.status(404).json({ error: 'Project configuration reference not found.' });
     }
 
-    // Obtener organización con miembros poblados
-    const organization = await Organization.findById(project.organizationId._id)
-      .populate('members.userId', '_id email');
+    const organization = await Organization.findById(project.organizationId?._id)
+      .populate('members.userId', '_id email name');
 
     if (!organization) {
-      return res.status(404).json({ error: 'Organización no encontrada' });
+      return res.status(404).json({ error: 'Parent workspace organization boundary missing.' });
     }
 
-    // Validar acceso - PROTECCIÓN DEFENSIVA
-    const orgOwnerId = organization.ownerId;
+    const orgOwnerId = organization.ownerId || organization.orgOwnerId;
     if (!orgOwnerId) {
-      return res.status(500).json({ error: 'Datos de organización corrompidos' });
+      return res.status(500).json({ error: 'System Integrity Error: Mongoose reference records corrupted.' });
     }
 
-    const isCreator = orgOwnerId.toString?.() === userId || orgOwnerId === userId;
+    const isCreator = String(orgOwnerId) === String(currentUserId);
     const isMember = organization.members?.some(m => {
       if (!m.userId) return false;
-      const memberUserId = m.userId._id ? m.userId._id.toString?.() : m.userId.toString?.();
-      return memberUserId === userId;
+      return String(m.userId._id || m.userId) === String(currentUserId);
     }) || false;
+    const isSuperAdmin = req.user?.role === 'super_admin';
 
-    if (!isCreator && !isMember) {
-      return res.status(403).json({ error: 'No tienes acceso a los miembros de este proyecto' });
+    if (!isCreator && !isMember && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: Operational membership listing reading access rejected.' });
     }
 
-    // Transformar miembros a formato compatible con frontend
     const members = organization.members
-      .filter(m => m.userId) // Solo incluir miembros con userId válido
+      .filter(m => m.userId)
       .map(m => ({
         _id: m.userId._id || m.userId.id,
         id: m.userId._id || m.userId.id,
         email: m.userId.email,
+        name: m.userId.name || 'Collaborator Asset',
         role: m.role
       }));
 
@@ -581,7 +491,7 @@ const getProjectMembers = async (req, res, next) => {
     });
 
   } catch (err) {
-    console.error('Error al obtener miembros del proyecto:', err.message);
+    console.error('[ProjectController] Failed to compile active project membership arrays:', err.message);
     next(err);
   }
 };

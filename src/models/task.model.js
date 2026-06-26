@@ -116,7 +116,7 @@ function decryptDescriptionIfSensitive(doc) {
   } else {
     if (doc.description && doc.sensitive) {
       try {
-        doc.description = decrypt(d.description);
+        doc.description = decrypt(doc.description);
       } catch (err) {
         console.error('Error al desencriptar descripción de tarea:', err.message);
       }

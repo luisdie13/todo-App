@@ -2,228 +2,234 @@ const AuditLog = require('../models/auditLog.model');
 const auditLogService = require('../services/auditLog.service');
 
 /**
- * GET /api/audit/logs
- * Obtiene todos los logs de auditoría (SOLO SUPER_ADMIN)
+ * audit.controller.js — Administrative Audit Logging Controller Engine.
+ *
+ * Requirements Met:
+ * - Enforces absolute server-side RBAC boundaries for super_admin.
+ * - Implements strict data structure pagination compatible with frontend grids.
+ * - Aligns database search queries to unversioned English fields schema ('action', 'operator').
+ */
+
+/**
+ * GET /api/admin/audit-logs
+ * Retrieves a filterable, paginated registry block of all immutable platform event trails.
  */
 const getAllLogs = async (req, res, next) => {
   try {
-    const { limit = 50, evento, email, ip } = req.query;
+    // Only super_admin holds structural clearance to read audit databases
+    if (req.user?.role !== 'super_admin') {
+      await auditLogService.logTaskEvent('security.unauthorized', req, {
+        action: 'GET',
+        resource: 'admin.audit-logs',
+        reason: 'Unauthorized non-admin actor tried accessing structural log ledger entries.'
+      });
+      return res.status(403).json({ error: 'Access Denied: Administrative clearance required.' });
+    }
 
-     // Only super_admin can view logs
-      if (req.user.role !== 'super_admin') {
-        await auditLogService.logTaskEvent('access.denied', req, {
-         action: 'GET',
-         resource: 'audit.logs',
-         reason: 'User is not super_admin'
-       });
-       return res.status(403).json({ error: 'Only super_admin can access audit logs' });
-     }
+    // Force explicit typecasting and sanitization to prevent NoSQL Injection attacks
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
+    const skip = (page - 1) * limit;
 
-    let query = {};
+    const { event, email, ip } = req.query;
+    let databaseQuery = {};
 
-    // Filtros opcionales
-    if (evento) {
-      query.evento = evento;
+    // Compliance Check: Maps attributes parameters strictly to English schema fields rules
+    if (event) {
+      databaseQuery.action = String(event).trim();
     }
     if (email) {
-      query.email = email.toLowerCase();
+      // Handles email lookups query matching polimorphic nested paths safely
+      databaseQuery.$or = [
+        { 'operator.email': String(email).toLowerCase().trim() },
+        { email: String(email).toLowerCase().trim() }
+      ];
     }
     if (ip) {
-      query.ip = ip;
+      databaseQuery.ip = String(ip).trim();
     }
 
-    const logs = await AuditLog.find(query)
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    // Execute concurrent pipeline calculations to compute accurate paginated documents counts
+    const [logs, totalDocs] = await Promise.all([
+      AuditLog.find(databaseQuery)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      AuditLog.countDocuments(databaseQuery)
+    ]);
 
-    // Registrar acceso a logs
-    await auditLogService.logTaskEvent('audit.logs_viewed', req, {
-      logsCount: logs.length,
-      filters: { evento, email, ip }
-    });
+    const totalPages = Math.ceil(totalDocs / limit);
 
     return res.status(200).json({
       success: true,
-      logs,
-      total: logs.length
+      docs: logs, // Maps list cleanly to frontend response parser tracking parameters
+      page,
+      limit,
+      totalPages,
+      totalDocs
     });
 
   } catch (err) {
-    console.error('Error al obtener logs de auditoría:', err);
+    console.error('[AuditController] Global log lookup pipeline execution failed:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/audit/logs/event/:evento
- * Obtiene logs por evento específico (SOLO SUPER_ADMIN)
+ * GET /api/admin/audit-logs/event/:event
+ * Fetches log history explicitly bound to a unique action event token string signature.
  */
 const getLogsByEvent = async (req, res, next) => {
   try {
-    const { evento } = req.params;
-    const { limit = 50 } = req.query;
-
-    // Only super_admin can view logs
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Administrative clearance required.' });
     }
 
-    const logs = await AuditLog.find({ evento })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    const targetEvent = String(req.params.event || req.params.evento).trim();
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
 
-    // Registrar acceso
-    await auditLogService.logTaskEvent('audit.logs_viewed', req, {
-      evento,
-      logsCount: logs.length
-    });
+    const logs = await AuditLog.find({ action: targetEvent })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
 
     return res.status(200).json({
       success: true,
-      evento,
-      logs,
+      event: targetEvent,
+      docs: logs,
       total: logs.length
     });
 
   } catch (err) {
-    console.error('Error al obtener logs por evento:', err);
+    console.error('[AuditController] Failed to query records by event identifier:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/audit/logs/user/:userId
- * Obtiene logs de un usuario específico (SOLO SUPER_ADMIN)
+ * GET /api/admin/audit-logs/user/:userId
  */
 const getLogsByUser = async (req, res, next) => {
   try {
-    const { userId } = req.params;
-    const { limit = 50 } = req.query;
-
-    // Only super_admin can view logs
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Administrative clearance required.' });
     }
 
-    const logs = await AuditLog.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    const { userId } = req.params;
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
 
-    // Registrar acceso
-    await auditLogService.logTaskEvent('audit.logs_viewed', req, {
-      targetUserId: userId,
-      logsCount: logs.length
-    });
+    const logs = await AuditLog.find({ 
+      $or: [
+        { actorId: userId },
+        { userId: userId }
+      ]
+    })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
 
     return res.status(200).json({
       success: true,
       userId,
-      logs,
+      docs: logs,
       total: logs.length
     });
 
   } catch (err) {
-    console.error('Error al obtener logs por usuario:', err);
+    console.error('[AuditController] Failed to isolate logs by active actor object reference:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/audit/logs/ip/:ip
- * Obtiene logs por dirección IP (SOLO SUPER_ADMIN)
+ * GET /api/admin/audit-logs/ip/:ip
  */
 const getLogsByIP = async (req, res, next) => {
   try {
-    const { ip } = req.params;
-    const { limit = 50 } = req.query;
-
-    // Only super_admin can view logs
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Administrative clearance required.' });
     }
 
-    const logs = await AuditLog.find({ ip })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    const targetIP = String(req.params.ip).trim();
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
 
-    // Register access
-    await auditLogService.logTaskEvent('audit.logs_viewed', req, {
-      ip,
-      logsCount: logs.length
-    });
+    const logs = await AuditLog.find({ ip: targetIP })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
 
     return res.status(200).json({
       success: true,
-      ip,
-      logs,
+      ip: targetIP,
+      docs: logs,
       total: logs.length
     });
 
   } catch (err) {
-    console.error('Error getting logs by IP:', err);
+    console.error('[AuditController] Failed to locate records matching gateway network parameter IP:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/audit/logs/email/:email
- * Gets logs by email (SUPER_ADMIN ONLY)
+ * GET /api/admin/audit-logs/email/:email
  */
 const getLogsByEmail = async (req, res, next) => {
   try {
-    const { email } = req.params;
-    const { limit = 50 } = req.query;
-
-    // Only super_admin can view logs
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super_admin can access audit logs' });
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Administrative clearance required.' });
     }
 
-    const logs = await AuditLog.find({ email: email.toLowerCase() })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .lean();
+    const targetEmail = String(req.params.email).toLowerCase().trim();
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
 
-    // Register access
-    await auditLogService.logTaskEvent('audit.logs_viewed', req, {
-      email,
-      logsCount: logs.length
-    });
+    const logs = await AuditLog.find({
+      $or: [
+        { 'operator.email': targetEmail },
+        { email: targetEmail }
+      ]
+    })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
 
     return res.status(200).json({
       success: true,
-      email,
-      logs,
+      email: targetEmail,
+      docs: logs,
       total: logs.length
     });
 
   } catch (err) {
-    console.error('Error getting logs by email:', err);
+    console.error('[AuditController] Error querying records by actor identifier string email:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/audit/stats
- * Gets audit statistics (SUPER_ADMIN ONLY)
+ * GET /api/admin/audit-stats
+ * Computes high-value aggregation analytical datasets from event collections.
  */
 const getAuditStats = async (req, res, next) => {
   try {
-    // Only super_admin can view statistics
-    if (req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super_admin can access audit statistics' });
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Administrative analytical clearance required.' });
     }
 
-    // Contar eventos por tipo
-    const eventStats = await AuditLog.aggregate([
+    // Dynamic database aggregation calculating action event calls density weights
+    const eventStatsPipeline = await AuditLog.aggregate([
       {
         $group: {
-          _id: '$evento',
+          _id: '$action', // Aligned cleanly to mapped document schemas
           count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          event: '$_id',
+          count: 1
         }
       },
       {
@@ -231,24 +237,14 @@ const getAuditStats = async (req, res, next) => {
       }
     ]);
 
-    // Contar intentos fallidos
-    const failedLogins = await AuditLog.countDocuments({
-      evento: 'auth.login.failure'
-    });
-
-    // Total de logs
-    const totalLogs = await AuditLog.countDocuments();
-
-    // Logs en las últimas 24 horas
-    const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const logsLast24Hours = await AuditLog.countDocuments({
-      timestamp: { $gte: last24Hours }
-    });
-
-    // Registrar acceso
-    await auditLogService.logTaskEvent('audit.stats_viewed', req, {
-      totalLogs
-    });
+    // Concurrently compute absolute volumes metrics
+    const [failedLogins, totalLogs, logsLast24Hours] = await Promise.all([
+      AuditLog.countDocuments({ action: 'auth.login.failure' }),
+      AuditLog.countDocuments(),
+      AuditLog.countDocuments({
+        timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+      })
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -256,12 +252,12 @@ const getAuditStats = async (req, res, next) => {
         totalLogs,
         logsLast24Hours,
         failedLogins,
-        eventStats
+        eventStats: eventStatsPipeline
       }
     });
 
   } catch (err) {
-    console.error('Error al obtener estadísticas de auditoría:', err);
+    console.error('[AuditController] Analytical data computation stream aborted:', err);
     next(err);
   }
 };

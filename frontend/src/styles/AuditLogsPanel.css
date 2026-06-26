@@ -1,4 +1,4 @@
-/* Estilos para Panel de Auditoría */
+/* Audit Log Viewer — table, filters, statistics, payload cells */
 
 .audit-logs-panel {
   background: #121212;
@@ -314,6 +314,96 @@
   background: #3a0007;
   border-left-color: #ff4757;
   color: #ff4757;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   New columns: Resource Type, Resource ID, User Agent, Payload cell
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.col-resource-type {
+  font-size: 12px;
+  color: #90caf9;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.col-resource-id {
+  font-size: 11px;
+}
+
+.resource-id-cell {
+  font-family: monospace;
+  background: #1a1a2e;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #b0bec5;
+  letter-spacing: 0.5px;
+}
+
+.col-ua {
+  max-width: 160px;
+  overflow: hidden;
+}
+
+.ua-cell {
+  display: block;
+  font-size: 11px;
+  color: #78909c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* Expandable payload cell */
+.payload-cell {
+  display: block;
+  font-size: 11px;
+  font-family: monospace;
+  color: #b0b0b0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.payload-cell:hover {
+  background: rgba(229, 9, 20, 0.06);
+  color: #e0e0e0;
+}
+
+.payload-cell.expanded {
+  white-space: normal;
+  word-break: break-all;
+  background: #1a1a2e;
+  padding: 6px 8px;
+  color: #e0e0e0;
+  max-width: 320px;
+}
+
+.log-empty {
+  color: #555;
+  font-size: 12px;
+}
+
+/* Pagination controls */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 0 4px;
+  font-size: 13px;
+  color: #b0b0b0;
+}
+
+.pagination span {
+  font-weight: 600;
+  color: #e0e0e0;
 }
 
 /* Responsive */

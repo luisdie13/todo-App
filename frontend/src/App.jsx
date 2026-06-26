@@ -6,153 +6,126 @@ import Dashboard from './pages/Dashboard';
 import Organization from './pages/Organization';
 import Project from './pages/Project';
 import { AuthProvider, AuthContext } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import { getAccessToken, clearCredentials, setTokens } from './services/tokenStorage';
 import api from './config/axios.config';
 import './App.css';
 
 // ============================================================
-// COMPONENTE INTERNO: AppRoutes (dentro del AuthProvider)
+// INNER COMPONENT: AppRoutes
+// Manages core infrastructure session lifecycle setups, 
+// silent token rotations, and enforces global RBAC/ABAC route protections.
 // ============================================================
 function AppRoutes() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(() => {
-    // NO recuperar usuario del localStorage (nunca almacenar datos sensibles)
-    // El usuario se establece solo después del login exitoso
-    return null;
-  });
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  
-  // ============================================================
-  // SINCRONIZACIÓN: Obtener context y actualizar authLoading
-  // ============================================================
+  const [user, setUser]                       = useState(null);
+  const [isLoading, setIsLoading]             = useState(true);
+  const [isAuthReady, setIsAuthReady]         = useState(false);
+
   const { setLoading } = useContext(AuthContext);
 
-  // ============================================================
-  // BANDERA DE CONTROL: Evitar múltiples intentos de refresh
-  // ============================================================
+  // Mitigation: Prevents infinite loop race conditions during token rotation
   const hasAttemptedRefreshRef = useRef(false);
 
-   useEffect(() => {
-      // Silent Refresh: Intentar refrescar la sesión al montar la app
-      const initializeAuth = async () => {
-        try {
-          // PROTECCIÓN: Prevenir múltiples intentos de refresh en el mismo ciclo
-          if (hasAttemptedRefreshRef.current) {
-            console.warn('⚠️  [PROTECCIÓN] Ya se intentó refresh en este ciclo. Evitando re-intento.');
-            setIsAuthenticated(false);
-            // NO apagar loading aquí - dejar que el finally lo haga
-            return;
-          }
+  // ── Silent refresh initialization on mount ─────────────────────────────
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        if (hasAttemptedRefreshRef.current) {
+          console.warn('⚠️ [SECURITY] Token rotation attempt blocked to prevent infinite cycle loops.');
+          setIsAuthenticated(false);
+          return;
+        }
 
-          const token = getAccessToken();
-          
-          if (token) {
-            // Ya hay token en memoria, mantener sesión
-            console.log('✓ Token existente en memoria. Sesión activa.');
-            setIsAuthenticated(true);
-            // Aún NO apagamos loading - esperar a que el finally lo haga
-          } else {
-            // No hay token en memoria, intentar refresh silencioso UNA SOLA VEZ
-            // La cookie HttpOnly será enviada automáticamente por el navegador
-            console.log('🔄 Intentando refresh silencioso...');
-            
-            // Marcar que ya estamos intentando (ANTES de hacer la petición)
-            hasAttemptedRefreshRef.current = true;
-            
-            try {
-              const response = await api.post('/auth/refresh');
-              
-              if (response.data?.accessToken) {
-                // Refresh exitoso, guardar tokens en memoria
-                console.log('✓ Refresh exitoso. Sesión restaurada.');
-                setTokens(response.data.accessToken, response.data.refreshToken);
-                
-                // CRÍTICO: Esperar a obtener datos del usuario ANTES de apagar loading
-                try {
-                  const userDataResponse = await api.get('/auth/me');
-                  if (userDataResponse.data?.user) {
-                    console.log('✓ Datos del usuario obtenidos tras refresh:', userDataResponse.data.user);
-                    setUser(userDataResponse.data.user);
-                    console.log('✅ Usuario guardado en memoria. Sistema listo.');
-                  } else {
-                    console.warn('⚠️  No se obtuvieron datos válidos del usuario.');
-                    setUser(null);
-                  }
-                } catch (userError) {
-                  console.warn('⚠️  No se pudieron obtener datos del usuario tras refresh:', userError.message);
+        const token = getAccessToken();
+
+        if (token) {
+          console.log('✓ Active access token resolved from secure in-memory storage context.');
+          setIsAuthenticated(true);
+        } else {
+          console.log('🔄 No session token in memory. Initiating secure silent token rotation…');
+          hasAttemptedRefreshRef.current = true;
+
+          try {
+            // Invokes the mandate endpoint via HttpOnly secure cookie parameters
+            const refreshResponse = await api.post('/auth/refresh');
+
+            if (refreshResponse.data?.accessToken) {
+              console.log('✓ Secure token rotation successful. Re-establishing runtime variables.');
+              setTokens(
+                refreshResponse.data.accessToken,
+                refreshResponse.data.refreshToken
+              );
+
+              // Instantly fetch full administrative context profiles
+              try {
+                const meResponse = await api.get('/auth/me');
+                if (meResponse.data?.user) {
+                  console.log('✓ Session user payload profile bound successfully.');
+                  setUser(meResponse.data.user);
+                } else {
                   setUser(null);
                 }
-                
-                setIsAuthenticated(true);
-              } else {
-                // No se obtuvo token, redirigir a login
-                console.warn('⚠️  No se obtuvo accessToken del refresh.');
-                setIsAuthenticated(false);
+              } catch (meError) {
+                console.warn('⚠️ Authorization registry lookup failed:', meError.message);
                 setUser(null);
               }
-            } catch (refreshError) {
-              // Refresh falló, pero no hacer logout inmediato
-              // El usuario podría no tener sesión válida, pero permitir que intente
-              console.log('ℹ️  No active session on refresh');
-              
-              // Si el error fue 401 (token expirado/inválido), limpiar completamente
-              if (refreshError.response?.status === 401) {
-                console.warn('⚠️  Token inválido o expirado. Limpiando sesión...');
-                clearCredentials();
-              }
-              
+
+              setIsAuthenticated(true);
+            } else {
+              console.warn('⚠️ Token rotation rejected. Null or empty token payload received.');
               setIsAuthenticated(false);
               setUser(null);
             }
+          } catch (refreshError) {
+            console.log('ℹ️ Session lookup complete: No active session cookie parameters detected.');
+            if (refreshError.response?.status === 401) {
+              console.warn('⚠️ Stale or invalid refresh parameters. Executing secure workspace purge…');
+              clearCredentials();
+            }
+            setIsAuthenticated(false);
+            setUser(null);
           }
-        } catch (error) {
-          // Captura cualquier error inesperado
-          console.error('Error inesperado en initializeAuth:', error);
-          setIsAuthenticated(false);
-          setUser(null);
-        } finally {
-          // ⭐⭐⭐ CRÍTICO: SIEMPRE liberamos el loader AQUÍ, después de TODA la lógica secuencial
-          // Esto garantiza que:
-          // 1. El refresh se intentó (si no había token en memoria)
-          // 2. Se obtuvieron los datos del usuario (si el refresh fue exitoso)
-          // 3. React tiene los datos de usuario en estado ANTES de renderizar rutas
-          console.log('🔓 Liberando loading. Sistema completamente inicializado.');
-          setIsLoading(false);
-          setLoading(false);
-          
-          // SINCRONIZACIÓN CRÍTICA: Marca que la inicialización de autenticación ha terminado
-          // Esto desbloquea la renderización del router después de que toda la lógica de
-          // refresh silencioso se haya completado (exitosa o no)
-          setIsAuthReady(true);
         }
-      };
+      } catch (unexpectedError) {
+        console.error('Critical authorization error detected during bootstrap:', unexpectedError);
+        setIsAuthenticated(false);
+        setUser(null);
+      } finally {
+        console.log('🔓 Infrastructure authorization complete. Releasing application pipeline thread.');
+        setIsLoading(false);
+        setLoading(false);
+        setIsAuthReady(true);
+      }
+    };
 
-      initializeAuth();
-    }, [setLoading]);
+    initializeAuth();
+  }, [setLoading]);
 
-  // ============================================================
-  // BLOQUEO CRÍTICO: No renderizar router hasta que isAuthReady sea true
-  // ============================================================
-  // Esto previene que React Router ejecute redirects antes de que el refresh
-  // silencioso haya completado la mutación del estado global de autenticación
-  if (!isAuthReady) {
+  // ── Blocking layout render while parsing authentication signatures ──
+  if (!isAuthReady || isLoading) {
     return (
-      <div className="bg-dark min-h-screen text-white p-5" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#0b0c10' }}>
-        <p style={{ color: '#ffffff', fontSize: '18px' }}>Cargando aplicación...</p>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          background: '#0b0c10',
+          fontFamily: 'sans-serif'
+        }}
+        role="alert"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <p style={{ color: '#ffffff', fontSize: '18px', letterSpacing: '0.5px' }}>
+          Verifying secure communication channel parameters…
+        </p>
       </div>
     );
   }
 
-  if (isLoading) {
-    // Mostrar un loader mientras se verifica la sesión
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#0b0c10' }}>
-        <p style={{ color: '#ffffff', fontSize: '18px' }}>Verificando sesión...</p>
-      </div>
-    );
-  }
-
+  // ── Session state mutator bindings ──────────────────────────────────────
   const handleLogin = (userData) => {
     setIsAuthenticated(true);
     setUser(userData);
@@ -164,27 +137,75 @@ function AppRoutes() {
     setUser(null);
   };
 
+  // ── Full-Stack Route Tree Configuration ─────────────────────────────────
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login onLogin={handleLogin} />} />
-        <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register onRegister={handleLogin} />} />
-        <Route path="/dashboard" element={isAuthenticated ? <Dashboard user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
-        <Route path="/organization/:organizationId" element={isAuthenticated ? <Organization user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
-        <Route path="/projects/:projectId" element={isAuthenticated ? <Project user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
-        <Route path="/project/:projectId" element={isAuthenticated ? <Project user={user} onLogout={handleLogout} /> : <Navigate to="/login" />} />
-        <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+
+        {/* ── Public Routes (OWASP Login / Register boundaries) ──────────── */}
+        <Route
+          path="/login"
+          element={
+            isAuthenticated
+              ? <Navigate to="/dashboard" replace />
+              : <Login onLogin={handleLogin} />
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            isAuthenticated
+              ? <Navigate to="/dashboard" replace />
+              : <Register onRegister={handleLogin} />
+          }
+        />
+
+        {/* ── Authenticated Routes (General Workspace passing layers) ────── */}
+        <Route element={<ProtectedRoute isAuthenticated={isAuthenticated} isLoading={isLoading} user={user} />}>
+          
+          {/* Default User Landing Core View */}
+          <Route path="/dashboard" element={<Dashboard user={user} onLogout={handleLogout} />} />
+          
+          {/* Contextual Management Routes */}
+          <Route path="/organization/:organizationId" element={<Organization user={user} onLogout={handleLogout} />} />
+          <Route path="/project/:projectId" element={<Project user={user} onLogout={handleLogout} />} />
+          <Route path="/projects/:projectId" element={<Navigate to="/project/:projectId" replace />} />
+        </Route>
+
+        {/* ── SuperAdmin Protected Routes (Strict Client-Side RBAC Enforcement) ── */}
+        <Route element={
+          <ProtectedRoute 
+            isAuthenticated={isAuthenticated} 
+            isLoading={isLoading} 
+            user={user} 
+            allowedRoles={['super_admin']} 
+          />
+        }>
+          {/* Saves structural overhead by routing the admin directly into the 
+            centralized console panel hooks we established inside Dashboard view.
+          */}
+          <Route path="/admin/users" element={<Dashboard user={user} onLogout={handleLogout} initialTab="users" />} />
+          <Route path="/admin/audit-logs" element={<Dashboard user={user} onLogout={handleLogout} initialTab="audit" />} />
+        </Route>
+
+        {/* ── Fallback Catch-All Layer ───────────────────────────────────── */}
+        <Route
+          path="*"
+          element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />}
+        />
+
       </Routes>
     </BrowserRouter>
   );
 }
 
 // ============================================================
-// COMPONENTE PRINCIPAL: App (envuelve con AuthProvider)
+// ROOT APPLICATION INJECTION
+// Envelops the reactive state pipeline under the AuthProvider.
 // ============================================================
 function App() {
   return (
-    <AuthProvider user={null}>
+    <AuthProvider>
       <AppRoutes />
     </AuthProvider>
   );

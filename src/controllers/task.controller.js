@@ -1,432 +1,378 @@
 const Task = require('../models/task.model');
 const Organization = require('../models/organization.model');
 const Membership = require('../models/membership.model');
-const { canCreateTask } = require('../middleware/checkPermission');
+const Project = require('../models/project.model');
 const auditLogService = require('../services/auditLog.service');
 
 /**
+ * task.controller.js — Secure Task Context Lifecycle Controller Engine.
+ * * Requirements Met:
+ * - Enforces Rule 4 Governance criteria by freezing all mutations if a project is 'archived'.
+ * - Sanitizes dynamic param route endpoints against destructive NoSQL Injection vectors.
+ * - Captures actions across both contextual and flat routes using logTaskEvent (Class 10).
+ */
+
+/**
  * GET /api/projects/:projectId/tasks
- * Obtiene todas las tareas de un proyecto (Validando acceso vía Organización)
+ * Retrieves all structural task models associated with a verified project boundary.
  */
 const getProjectTasks = async (req, res, next) => {
   try {
-    const { projectId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // 1. Buscar proyecto
-    const Project = require('../models/project.model');
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
+      return res.status(404).json({ error: 'Project perimeter target records not found.' });
     }
 
-    // 2. Buscar organización dueña del proyecto
-    const Organization = require('../models/organization.model');
     const organization = await Organization.findById(project.organizationId);
     if (!organization) {
-      return res.status(404).json({ error: 'Project organization does not exist' });
+      return res.status(404).json({ error: 'Parent workplace organization boundary does not exist.' });
     }
 
-     // 3. Validar accesos usando la estructura comprobada de project.controller
-      // PROTECCIÓN DEFENSIVA: Asegurar que ownerId existe antes de llamar .toString()
-      const projectOwnerId = project.ownerId;
-      const orgOwnerId = organization.ownerId;
-      
-      if (!projectOwnerId || !orgOwnerId) {
-        console.error('CRITICAL ERROR: project.ownerId or organization.ownerId is undefined', {
-          projectOwnerId: projectOwnerId ? 'exists' : 'UNDEFINED',
-          orgOwnerId: orgOwnerId ? 'exists' : 'UNDEFINED'
-        });
-        return res.status(500).json({ error: 'Owner data corrupted on server' });
-      }
-
-      const isProjectCreator = projectOwnerId.toString?.() === userId || projectOwnerId === userId;
-      const isOrgCreator = orgOwnerId.toString?.() === userId || orgOwnerId === userId;
-      
-      const isOrgMember = organization.members?.some(m => {
-        if (!m.userId) return false;
-        const idMember = m.userId?._id ? m.userId._id.toString?.() : m.userId.toString?.();
-        return idMember === userId;
-      }) || false;
-
-    // Log de control en inglés para mantener el estándar en tu consola
-    console.log(`🚀 [HIT] getProjectTasks -> User ID: ${userId} | Is Member: ${isOrgMember}`);
-
-    if (!isProjectCreator && !isOrgCreator && !isOrgMember) {
-      return res.status(403).json({ error: 'You do not have access to this project' });
-    }
-
-      // 4. Retornar las tareas con populate defensivo
-      const tasks = await Task.find({ projectId })
-        .populate('userId', 'email')
-        .populate('assignee', 'name email')
-        .sort({ createdAt: -1 })
-        .lean();
-
-      // DEFENSA: Transformar respuesta para asegurar estructura consistente
-      const safeTasks = tasks.map(task => {
-        return {
-          _id: task._id,
-          title: task.title,
-          description: task.description,
-          sensitive: task.sensitive,
-          completed: task.completed,
-          userId: task.userId,
-          assignee: task.assignee,
-          assigneeId: task.assignee, // Para compatibilidad frontend
-          projectId: task.projectId,
-          status: task.status || 'backlog',
-          priority: task.priority || 'medium',
-          dueDate: task.dueDate || null,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt
-        };
-      });
-
-     return res.status(200).json(safeTasks);
-
-  } catch (err) {
-    console.error('Error getting project tasks:', err);
-    next(err);
-  }
-};
-
-/**
- * POST /api/projects/:projectId/tasks
- * Crea una nueva tarea en un proyecto
- */
-const createProjectTask = async (req, res, next) => {
-  try {
-    const { projectId } = req.params;
-    const { title, description, sensitive = false, assigneeId = null, dueDate = null } = req.body;
-    const userId = req.user.id;
-
-    // Validar entrada
-    if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ error: 'Title is required' });
-    }
-
-    // Verificar que el proyecto existe
-    const Project = require('../models/project.model');
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-
-    // Verificar que el usuario tiene acceso al proyecto
-    const Organization = require('../models/organization.model');
-    const organization = await Organization.findById(project.organizationId);
+    const projectOwnerId = project.ownerId;
+    const orgOwnerId = organization.ownerId || organization.orgOwnerId;
     
-    // PROTECCIÓN DEFENSIVA: Validar que ownerId existe antes de .toString()
-    const projOwner = project.ownerId;
-    const orgOwner = organization.ownerId;
-    
-    if (!projOwner || !orgOwner) {
-      console.error('ERROR: Missing owner IDs in createProjectTask', { projOwner, orgOwner });
-      return res.status(500).json({ error: 'Owner data corrupted' });
+    if (!projectOwnerId || !orgOwnerId) {
+      return res.status(500).json({ error: 'System Integrity Error: Structural data ownership records corrupted.' });
     }
+
+    const isProjectCreator = String(projectOwnerId) === String(currentUserId);
+    const isOrgCreator = String(orgOwnerId) === String(currentUserId);
     
-    const isProjectCreator = projOwner.toString?.() === userId || projOwner === userId;
-    const isOrgCreator = orgOwner.toString?.() === userId || orgOwner === userId;
     const isOrgMember = organization.members?.some(m => {
       if (!m.userId) return false;
-      const memberUserId = m.userId._id ? m.userId._id.toString?.() : m.userId.toString?.();
-      return memberUserId === userId;
+      return String(m.userId._id || m.userId) === String(currentUserId);
     }) || false;
-    
-    if (!isProjectCreator && !isOrgCreator && !isOrgMember) {
-      await auditLogService.logTaskEvent('task.unauthorized_access', req, {
-        projectId,
-        action: 'CREATE',
-        reason: 'User does not have access to project'
-      });
-      return res.status(403).json({ error: 'You do not have access to this project' });
+
+    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    if (!isProjectCreator && !isOrgCreator && !isOrgMember && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: Absolute isolation rule restricts viewing this board.' });
     }
 
-    // Crear tarea
-    const task = new Task({
-      title: title.trim(),
-      description: description ? description.trim() : null,
-      sensitive: sensitive === true,
-      userId: userId,
-      assignee: assigneeId || null,
-      projectId,
-      dueDate: dueDate || null
-    });
+    const tasks = await Task.find({ projectId })
+      .populate('userId', 'email name')
+      .populate('assignee', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
 
-    await task.save();
-    await task.populate(['userId', 'assignee'], 'name email');
-
-    // Registrar en auditoría
-    await auditLogService.logTaskEvent('task.created', req, {
-      taskId: task._id,
-      projectId,
-      taskTitle: task.title,
-      sensitive: task.sensitive,
-      assigneeId: assigneeId
-    });
-
-    // Transformar respuesta para asegurar estructura consistente con Frontend
-    const responseTask = {
+    // Data normalizer array builder mapping fields to secure uniform frontend keys
+    const safeTasks = tasks.map(task => ({
       _id: task._id,
+      id: task._id,
       title: task.title,
       description: task.description,
-      sensitive: task.sensitive,
-      completed: task.completed,
+      sensitive: !!task.sensitive,
+      completed: !!task.completed,
       userId: task.userId,
       assignee: task.assignee,
-      assigneeId: task.assignee, // Para compatibilidad frontend
+      assigneeId: task.assignee?._id || task.assignee || null,
       projectId: task.projectId,
       status: task.status || 'backlog',
       priority: task.priority || 'medium',
       dueDate: task.dueDate || null,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt
-    };
+    }));
+
+    return res.status(200).json(safeTasks);
+
+  } catch (err) {
+    console.error('[TaskController] Failed to compile project tasks grid stream:', err);
+    next(err);
+  }
+};
+
+/**
+ * POST /api/projects/:projectId/tasks
+ * Provisions a fresh task model into an active project partition.
+ */
+const createProjectTask = async (req, res, next) => {
+  try {
+    const projectId = String(req.params.projectId).trim();
+    const { title, description, sensitive = false, assigneeId = null, dueDate = null, priority = 'medium', status = 'backlog' } = req.body;
+    const currentUserId = req.user?.id || req.user?._id;
+
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ error: 'Validation Error: Task specification title is required.' });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Target project record not found.' });
+    }
+
+    // ── RULE 4 GOVERNANCE ENFORCEMENT: Locked parent project check ─────────
+    if (project.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Adding new items is restricted.' });
+    }
+
+    const organization = await Organization.findById(project.organizationId);
+    if (!organization) {
+      return res.status(500).json({ error: 'System Integrity Error: Parent organization missing.' });
+    }
+    
+    const membership = await Membership.findOne({ userId: currentUserId, projectId: projectId }) || 
+                       await Membership.findOne({ userId: currentUserId, organizationId: organization._id });
+                       
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    const isProjectOwner = String(project.ownerId) === String(currentUserId);
+
+    if (!membership && !isSuperAdmin && !isProjectOwner) {
+      await auditLogService.logTaskEvent("task.unauthorized_access", req, {
+        projectId,
+        action: "CREATE",
+        reason: "User lacks assignment membership records over project perimeter."
+      });
+      return res.status(403).json({ error: "Access Denied: Membership credentials required." });
+    }
+
+    // Rule 2 Enforcement: Block write access vectors for explicit 'viewer' roles
+    if (membership && membership.role === "viewer" && !isSuperAdmin) {
+      await auditLogService.logTaskEvent("task.unauthorized_access", req, {
+        projectId,
+        action: "CREATE",
+        reason: "Viewer role context blocked from provisioning write items."
+      });
+      return res.status(403).json({ error: "Access Denied: View-Only session tokens block adding task payload assets." });
+    }
+
+    const task = new Task({
+      title: String(title).trim(),
+      description: description ? String(description).trim() : null,
+      sensitive: sensitive === true,
+      userId: currentUserId,
+      assignee: assigneeId || null,
+      projectId: projectId,
+      priority: priority || 'medium',
+      status: status || 'backlog',
+      dueDate: dueDate || null
+    });
+
+    await task.save();
+    await task.populate(['userId', 'assignee'], 'name email');
+
+    await auditLogService.logTaskEvent('task.create', req, {
+      taskId: task._id,
+      projectId,
+      taskTitle: task.title,
+      status: 'success'
+    });
 
     return res.status(201).json({
-      message: 'Task created successfully',
-      task: responseTask
+      message: 'Task specification resource created successfully.',
+      task: {
+        _id: task._id,
+        id: task._id,
+        title: task.title,
+        description: task.description,
+        sensitive: task.sensitive,
+        completed: task.completed,
+        userId: task.userId,
+        assignee: task.assignee,
+        assigneeId: task.assignee?._id || task.assignee || null,
+        projectId: task.projectId,
+        status: task.status,
+        priority: task.priority,
+        dueDate: task.dueDate
+      }
     });
 
   } catch (err) {
-    console.error('Error creating task:', err);
+    console.error('[TaskController] Error expanding project task entries pool:', err);
     next(err);
   }
 };
 
 /**
  * GET /api/projects/:projectId/tasks/:taskId
- * Obtiene los detalles de una tarea específica
  */
 const getProjectTask = async (req, res, next) => {
   try {
-    const { projectId, taskId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const taskId = String(req.params.taskId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Verificar membresía
-    const membership = await Membership.findOne({
-      userId,
-      projectId
-    });
-
-    if (!membership) {
-      return res.status(403).json({ error: 'You do not have access to this project' });
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project perimeter target records not found.' });
     }
 
-    // Obtener tarea
-    const task = await Task.findOne({
-      _id: taskId,
-      projectId
-    }).populate('userId', 'email').populate('assignee', 'name email');
+    const membership = await Membership.findOne({ userId: currentUserId, projectId }) || 
+                       await Membership.findOne({ userId: currentUserId, organizationId: project.organizationId });
+    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    if (!membership && !isSuperAdmin && String(project.ownerId) !== String(currentUserId)) {
+      return res.status(403).json({ error: 'Access Denied: Absolute isolation restricts viewing this task profile.' });
+    }
+
+    const task = await Task.findOne({ _id: taskId, projectId })
+      .populate('userId', 'email name')
+      .populate('assignee', 'name email');
 
     if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+      return res.status(404).json({ error: 'Target task registry profile not located.' });
     }
 
-    return res.status(200).json(task);
+    return res.status(200).json({ success: true, task });
 
   } catch (err) {
-    console.error('Error getting task:', err);
+    console.error('[TaskController] Unique task metadata lookup crashed:', err);
     next(err);
   }
 };
 
 /**
  * PUT /api/projects/:projectId/tasks/:taskId
- * Actualiza una tarea del proyecto
+ * Context Route variant used to adjust specific task metrics within project containers.
  */
 const updateProjectTask = async (req, res, next) => {
   try {
-    const { projectId, taskId } = req.params;
+    const projectId = String(req.params.projectId).trim();
+    const taskId = String(req.params.taskId).trim();
     const { title, description, completed, status, priority, assigneeId, dueDate } = req.body;
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener tarea
-    const task = await Task.findOne({
-      _id: taskId,
-      projectId
-    });
-
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Parent project reference address not found.' });
     }
 
-    // Verificar permisos (usar checkPermission)
+    // ── RULE 4 GOVERNANCE ENFORCEMENT: Locked parent project check ─────────
+    if (project.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Configuration changes are restricted.' });
+    }
+
+    const task = await Task.findOne({ _id: taskId, projectId });
+    if (!task) {
+      return res.status(404).json({ error: 'Task asset specifications target records not found.' });
+    }
+
     const { canEditTask } = require('../middleware/checkPermission');
-    const canEdit = await canEditTask(req.user, task);
+    const canEdit = await canEditTask(req.user, task) || req.user?.role === 'super_admin';
 
     if (!canEdit) {
-      // Registrar intento no autorizado
       await auditLogService.logTaskEvent('task.unauthorized_access', req, {
         taskId,
         projectId,
         action: 'UPDATE',
-        reason: 'User does not have permission to edit this task'
+        reason: 'User session tokens lack credentials parameters over this asset.'
       });
-      return res.status(403).json({ error: 'You do not have permission to edit this task' });
+      return res.status(403).json({ error: 'Access Denied: You lack permissions to modify this task.' });
     }
 
-    // Actualizar campos
-    if (title) {
-      task.title = title.trim();
-    }
-
-    if (description !== undefined) {
-      task.description = description ? description.trim() : null;
-    }
-
-    if (completed !== undefined) {
-      task.completed = completed;
-    }
-
-    if (status) {
-      task.status = status;
-    }
-
-    if (priority) {
-      task.priority = priority;
-    }
-
-    if (assigneeId !== undefined) {
-      task.assignee = assigneeId || null;
-    }
-
-    if (dueDate !== undefined) {
-      task.dueDate = dueDate || null;
-    }
+    if (title) task.title = String(title).trim();
+    if (description !== undefined) task.description = description ? String(description).trim() : null;
+    if (completed !== undefined) task.completed = !!completed;
+    if (status) task.status = String(status).trim();
+    if (priority) task.priority = String(priority).trim();
+    if (assigneeId !== undefined) task.assignee = assigneeId || null;
+    if (dueDate !== undefined) task.dueDate = dueDate || null;
 
     await task.save();
     await task.populate(['userId', 'assignee'], 'name email');
 
-    // Registrar en auditoría
-    await auditLogService.logTaskEvent('task.updated', req, {
+    await auditLogService.logTaskEvent('task.update', req, {
       taskId,
       projectId,
-      taskTitle: task.title
+      taskTitle: task.title,
+      status: 'success'
     });
 
     return res.status(200).json({
-      message: 'Task updated successfully',
+      message: 'Task profile parameters updated successfully.',
       task
     });
 
   } catch (err) {
-    console.error('Error updating task:', err);
+    console.error('[TaskController] Context update request execution failure:', err);
     next(err);
   }
 };
 
 /**
  * DELETE /api/projects/:projectId/tasks/:taskId
- * Elimina una tarea del proyecto
- * NOTA: project_admin puede eliminar CUALQUIER tarea, developer solo la suya
  */
 const deleteProjectTask = async (req, res, next) => {
   try {
-    const { projectId, taskId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const taskId = String(req.params.taskId).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener tarea
-    const task = await Task.findOne({
-      _id: taskId,
-      projectId
-    });
-
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    // Obtener proyecto para validar membership
-    const Project = require('../models/project.model');
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
+      return res.status(404).json({ error: 'Parent project reference address not found.' });
     }
 
-    // Verificar membresía y permisos
-    const membership = await Membership.findOne({
-      userId,
-      projectId
-    });
+    // ── RULE 4 GOVERNANCE ENFORCEMENT ──────────────────────────────────────
+    if (project.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Resource destruction sequences are rejected.' });
+    }
 
-    // Super admin siempre puede eliminar
-    if (req.user.role === 'super_admin') {
-      // Continuar con la eliminación
+    const task = await Task.findOne({ _id: taskId, projectId });
+    if (!task) {
+      return res.status(404).json({ error: 'Target task registry records not located.' });
     }
-    // project_admin puede eliminar cualquier tarea en su proyecto
-    else if (membership && membership.isAdmin()) {
-      // Continuar con la eliminación
-    }
-    // developer solo puede eliminar su propia tarea
-    else if (membership && membership.hasRole('developer')) {
-      if (task.userId.toString() !== userId) {
-        await auditLogService.logTaskEvent('task.unauthorized_deletion', req, {
-          taskId,
-          projectId,
-          reason: 'Developer can only delete their own tasks'
-        });
-        return res.status(403).json({ error: 'You can only delete your own tasks' });
-      }
-    }
-    // Sin membresía, no puede eliminar
-    else {
+
+    const membership = await Membership.findOne({ userId: currentUserId, projectId });
+    const isSuperAdmin = req.user?.role === 'super_admin';
+    const isTaskOwner = String(task.userId) === String(currentUserId);
+    const isBoardAdmin = membership && (typeof membership.isAdmin === 'function' ? membership.isAdmin() : membership.role === 'project_admin');
+
+    if (!isSuperAdmin && !isBoardAdmin && (!isTaskOwner || (membership && membership.role === 'viewer'))) {
       await auditLogService.logTaskEvent('task.unauthorized_deletion', req, {
         taskId,
         projectId,
-        reason: 'User does not have access to this project'
+        reason: 'Operator context metrics lack sufficient roles parameters to delete resource.'
       });
-      return res.status(403).json({ error: 'You do not have permission to delete this task' });
+      return res.status(403).json({ error: 'Access Denied: Task erasure rejected.' });
     }
 
-    // Eliminar
     await Task.findByIdAndDelete(taskId);
 
-    // Registrar en auditoría
-    await auditLogService.logTaskEvent('task.deleted', req, {
+    await auditLogService.logTaskEvent('task.delete', req, {
       taskId,
       projectId,
-      taskTitle: task.title
+      taskTitle: task.title,
+      status: 'success'
     });
 
     return res.status(200).json({
-      message: 'Task deleted successfully'
+      message: 'Task environment record deleted successfully.'
     });
 
   } catch (err) {
-    console.error('Error deleting task:', err);
+    console.error('[TaskController] Context drop procedure aborted by server:', err);
     next(err);
   }
 };
 
 /**
  * PUT /api/projects/:projectId/tasks/:taskId/mark-done
- * Marca una tarea como completada (respeta ABAC)
  */
 const markTaskDone = async (req, res, next) => {
   try {
-    const { projectId, taskId } = req.params;
-    const userId = req.user.id;
+    const projectId = String(req.params.projectId).trim();
+    const taskId = String(req.params.taskId).trim();
     const { ABACContext, abacEngine } = require('../policies/abac.policy');
-    const Project = require('../models/project.model');
 
-    // Obtener tarea
-    const task = await Task.findOne({
-      _id: taskId,
-      projectId
-    }).populate('userId assignee', 'name email');
-
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    // Obtener proyecto
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
+      return res.status(404).json({ error: 'Project configuration addresses missing.' });
     }
 
-    // Crear contexto ABAC
+    // ── RULE 4 GOVERNANCE ENFORCEMENT ──────────────────────────────────────
+    if (project.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Transition requests are blocked.' });
+    }
+
+    const task = await Task.findOne({ _id: taskId, projectId }).populate('userId assignee', 'name email');
+    if (!task) {
+      return res.status(404).json({ error: 'Task profile data entries not found.' });
+    }
+
     const context = new ABACContext({
       user: req.user,
       resource: 'task',
@@ -436,153 +382,173 @@ const markTaskDone = async (req, res, next) => {
       resourceObj: task
     });
 
-    // Evaluar política
     const allowed = await abacEngine.evaluate(context);
-
     if (!allowed) {
       await auditLogService.logTaskEvent('access.denied', req, {
         resource: 'task',
         action: 'mark_done',
         projectId,
         taskId,
-        reason: 'User does not have permission to mark this task as completed'
+        reason: 'Enforced ABAC boundary checks rejected task transition command.'
       });
-      return res.status(403).json({
-        error: 'You do not have permission to mark this task as completed'
-      });
+      return res.status(403).json({ error: 'Access Denied: Context metrics prevent marking this asset as completed.' });
     }
 
-    // Marcar como done
     task.completed = true;
+    task.status = 'done';
     await task.save();
-    await task.populate(['userId', 'assignee'], 'name email');
 
-    // Registrar en auditoría
-    await auditLogService.logTaskEvent('task.marked_done', req, {
+    await auditLogService.logTaskEvent('task.status_change', req, {
       taskId,
       projectId,
-      taskTitle: task.title
+      taskTitle: task.title,
+      status: 'success',
+      details: 'Task context state flags successfully forced to completed.'
     });
 
     return res.status(200).json({
-      message: 'Task marked as completed',
+      message: 'Task resource state completed successfully.',
       task
     });
 
   } catch (err) {
-    console.error('Error marking task as completed:', err);
+    console.error('[TaskController] Exception inside ABAC status mark transition stream:', err);
     next(err);
   }
 };
 
 /**
- * GET /api/tasks - Obtener tareas del usuario
- * Método plano para obtener tareas sin especificar proyecto
+ * GET /api/tasks
+ * Flat route variant loading active tasks matching direct creator identifiers.
  */
 const getTasks = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
     
-    // Obtener todas las tareas del usuario actual
-    const tasks = await Task.find({ userId: userId })
-      .populate('userId', 'email')
+    const tasks = await Task.find({ userId: currentUserId })
+      .populate('userId', 'email name')
       .populate('assignee', 'name email')
       .sort({ createdAt: -1 })
       .lean();
     
     return res.status(200).json(tasks);
   } catch (err) {
-    console.error('Error getting tasks:', err);
+    console.error('[TaskController] Flat query registries lookup failed:', err);
     next(err);
   }
 };
 
 /**
- * PUT /api/tasks/:id - Actualizar tarea (ruta plana)
+ * PUT /api/tasks/:id
+ * Flat route unifier linked to Frontend Kanban Board updates.
  */
 const updateTask = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const taskId = String(req.params.id).trim();
     const { title, description, completed, status, priority, assigneeId, dueDate } = req.body;
-    const userId = req.user.id;
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener tarea
-    const task = await Task.findById(id);
-
+    const task = await Task.findById(taskId);
     if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+      return res.status(404).json({ error: 'Task target context registry not located.' });
     }
 
-    // Verificar permisos (el usuario es propietario o asignado)
-    if (task.userId.toString() !== userId && task.assignee?.toString() !== userId) {
-      return res.status(403).json({ error: 'You do not have permission to edit this task' });
+    // ── RULE 4 GOVERNANCE ENFORCEMENT: Cross check parent project status ───
+    const parentProject = await Project.findById(task.projectId);
+    if (parentProject && parentProject.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Task updates across flat channels are denied.' });
     }
 
-    // Actualizar campos
-    if (title) task.title = title.trim();
-    if (description !== undefined) task.description = description ? description.trim() : null;
-    if (completed !== undefined) task.completed = completed;
-    if (status) task.status = status;
-    if (priority) task.priority = priority;
+    const isOwner = String(task.userId) === String(currentUserId);
+    const isAssignee = task.assignee && String(task.assignee) === String(currentUserId);
+    const isSuperAdmin = req.user?.role === 'super_admin';
+
+    if (!isOwner && !isAssignee && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Access Denied: You possess no active connection parameters over this asset.' });
+    }
+
+    if (title) task.title = String(title).trim();
+    if (description !== undefined) task.description = description ? String(description).trim() : null;
+    if (completed !== undefined) task.completed = !!completed;
+    if (status) task.status = String(status).trim();
+    if (priority) task.priority = String(priority).trim();
     if (assigneeId !== undefined) task.assignee = assigneeId || null;
     if (dueDate !== undefined) task.dueDate = dueDate || null;
 
     await task.save();
     await task.populate(['userId', 'assignee'], 'name email');
 
-    // Transformar respuesta para asegurar estructura consistente con Frontend
-    const responseTask = {
-      _id: task._id,
-      title: task.title,
-      description: task.description,
-      sensitive: task.sensitive,
-      completed: task.completed,
-      userId: task.userId,
-      assignee: task.assignee,
-      assigneeId: task.assignee, // Para compatibilidad frontend
+    // Clase 10 Logging for Flat Route pipelines
+    await auditLogService.logTaskEvent('task.update', req, {
+      taskId: task._id,
       projectId: task.projectId,
-      status: task.status || 'backlog',
-      priority: task.priority || 'medium',
-      dueDate: task.dueDate || null,
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt
-    };
+      taskTitle: task.title,
+      status: 'success'
+    });
 
-    return res.status(200).json(responseTask);
+    return res.status(200).json({
+      success: true,
+      task: {
+        _id: task._id,
+        id: task._id,
+        title: task.title,
+        description: task.description,
+        sensitive: task.sensitive,
+        completed: task.completed,
+        userId: task.userId,
+        assignee: task.assignee,
+        assigneeId: task.assignee?._id || task.assignee || null,
+        projectId: task.projectId,
+        status: task.status,
+        priority: task.priority,
+        dueDate: task.dueDate,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt
+      }
+    });
 
   } catch (err) {
-    console.error('Error updating task:', err);
+    console.error('[TaskController] Flat route execution update workflow failed:', err);
     next(err);
   }
 };
 
 /**
- * DELETE /api/tasks/:id - Eliminar tarea (ruta plana)
+ * DELETE /api/tasks/:id
  */
 const deleteTask = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const userId = req.user.id;
+    const taskId = String(req.params.id).trim();
+    const currentUserId = req.user?.id || req.user?._id;
 
-    // Obtener tarea
-    const task = await Task.findById(id);
-
+    const task = await Task.findById(taskId);
     if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+      return res.status(404).json({ error: 'Task target context registry not located.' });
     }
 
-    // Verificar permisos
-    if (task.userId.toString() !== userId) {
-      return res.status(403).json({ error: 'You do not have permission to delete this task' });
+    // ── RULE 4 GOVERNANCE ENFORCEMENT ──────────────────────────────────────
+    const parentProject = await Project.findById(task.projectId);
+    if (parentProject && parentProject.status === 'archived') {
+      return res.status(403).json({ error: 'Locked Boundary Perimeter: Project is archived. Resource drops are blocked.' });
     }
 
-    // Eliminar
-    await Task.findByIdAndDelete(id);
+    if (String(task.userId) !== String(currentUserId) && req.user?.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Access Denied: Destruction routines are locked to the task owner.' });
+    }
 
-    return res.status(200).json({ message: 'Task deleted successfully' });
+    await Task.findByIdAndDelete(taskId);
+
+    await auditLogService.logTaskEvent('task.delete', req, {
+      taskId,
+      projectId: task.projectId,
+      taskTitle: task.title,
+      status: 'success'
+    });
+
+    return res.status(200).json({ success: true, message: 'Task entity dropped successfully from structural storage.' });
 
   } catch (err) {
-    console.error('Error deleting task:', err);
+    console.error('[TaskController] Flat route destructive drop sequence crashed:', err);
     next(err);
   }
 };

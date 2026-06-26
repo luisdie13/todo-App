@@ -1,251 +1,179 @@
 /**
- * Utilidad para determinar permisos en el frontend
- * Basado en roles de membresía en proyectos
+ * Frontend ABAC permission utilities.
+ *
+ * Mirrors the server-side ABAC policies so the UI can conditionally render
+ * controls before the request is made.  These are soft guards only —
+ * the authoritative enforcement always happens on the backend.
+ *
+ * User object shape (decoded JWT):  { id, email, role }
+ * Membership shape:                 { role: 'project_admin' | 'developer' | 'viewer' }
+ * Project shape:                    { status: 'active' | 'archived' }
  */
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const isSuperAdmin   = (user) => user?.role === 'super_admin';
+const isProjectAdmin = (membership) => membership?.role === 'project_admin';
+const isDeveloper    = (membership) => membership?.role === 'developer';
+
+/** Returns true if the project is archived (no mutations allowed). */
+const isArchived = (project) => project?.status === 'archived';
+
+// ══════════════════════════════════════════════════════════════════════════
+// Task permissions
+// ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Determina si un usuario puede leer una tarea
- * @param {Object} usuario - Usuario actual
- * @param {Object} tarea - Tarea a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {Boolean}
+ * Determines whether the user may read a given task.
+ * All project members (project_admin, developer, viewer) can read.
  */
-export const canReadTask = (usuario, tarea, membership) => {
-  if (!usuario) return false;
-
-  // Super admin puede leer cualquier tarea
-  if (usuario.rol === 'super_admin') return true;
-
-  // Sin membresía, no puede leer
+export const canReadTask = (user, task, membership) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
   if (!membership) return false;
-
-  // Todos los roles pueden leer (project_admin, developer, viewer)
   return ['project_admin', 'developer', 'viewer'].includes(membership.role);
 };
 
 /**
- * Determina si un usuario puede crear una tarea
- * @param {Object} usuario - Usuario actual
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @param {Object} proyecto - Proyecto actual
- * @returns {Boolean}
+ * Determines whether the user may create tasks in the project.
+ * Viewers are explicitly excluded.
  */
-export const canCreateTask = (usuario, membership, proyecto) => {
-  if (!usuario) return false;
-
-  // Super admin puede crear tareas en cualquier proyecto
-  if (usuario.rol === 'super_admin') return true;
-
-  // Proyecto archivado: no se pueden crear tareas
-  if (proyecto && proyecto.estado === 'archivado') return false;
-
-  // Sin membresía, no puede crear
+export const canCreateTask = (user, membership, project) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isArchived(project)) return false;
   if (!membership) return false;
-
-  // Solo project_admin y developer pueden crear
   return ['project_admin', 'developer'].includes(membership.role);
 };
 
 /**
- * Determina si un usuario puede editar una tarea
- * @param {Object} usuario - Usuario actual
- * @param {Object} tarea - Tarea a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @param {Object} proyecto - Proyecto actual
- * @returns {Boolean}
+ * Determines whether the user may edit a task.
+ * - project_admin can edit any task.
+ * - developer can only edit tasks they own.
+ * - viewer cannot edit.
  */
-export const canEditTask = (usuario, tarea, membership, proyecto) => {
-  if (!usuario) return false;
-
-  // Super admin puede editar cualquier tarea
-  if (usuario.rol === 'super_admin') return true;
-
-  // Proyecto archivado: no se pueden editar tareas
-  if (proyecto && proyecto.estado === 'archivado') return false;
-
-  // Sin membresía, no puede editar
+export const canEditTask = (user, task, membership, project) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isArchived(project)) return false;
   if (!membership) return false;
-
-  // project_admin puede editar cualquier tarea
-  if (membership.role === 'project_admin') return true;
-
-  // developer puede editar solo sus propias tareas
-  if (membership.role === 'developer') {
-    return tarea.usuarioId === usuario.id;
+  if (isProjectAdmin(membership)) return true;
+  if (isDeveloper(membership)) {
+    // Support both populated userId and flat userId field
+    const ownerId = task?.userId?._id || task?.userId;
+    return String(ownerId) === String(user.id);
   }
-
-  // viewer no puede editar
   return false;
 };
 
 /**
- * Determina si un usuario puede eliminar una tarea
- * @param {Object} usuario - Usuario actual
- * @param {Object} tarea - Tarea a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @param {Object} proyecto - Proyecto actual
- * @returns {Boolean}
+ * Determines whether the user may delete a task.
+ * Only project_admin (and super_admin) may delete tasks.
  */
-export const canDeleteTask = (usuario, tarea, membership, proyecto) => {
-  if (!usuario) return false;
-
-  // Super admin puede eliminar cualquier tarea
-  if (usuario.rol === 'super_admin') return true;
-
-  // Proyecto archivado: no se pueden eliminar tareas
-  if (proyecto && proyecto.estado === 'archivado') return false;
-
-  // Sin membresía, no puede eliminar
+export const canDeleteTask = (user, task, membership, project) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isArchived(project)) return false;
   if (!membership) return false;
-
-  // Solo project_admin puede eliminar
-  return membership.role === 'project_admin';
+  return isProjectAdmin(membership);
 };
 
 /**
- * Determina si un usuario puede marcar una tarea como completada
- * @param {Object} usuario - Usuario actual
- * @param {Object} tarea - Tarea a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @param {Object} proyecto - Proyecto actual
- * @returns {Boolean}
+ * Determines whether the user may mark a task as completed.
+ * - project_admin can mark any task.
+ * - developer can mark only their assigned (or owned) tasks.
  */
-export const canMarkDone = (usuario, tarea, membership, proyecto) => {
-  if (!usuario) return false;
-
-  // Super admin puede marcar cualquier tarea como done
-  if (usuario.rol === 'super_admin') return true;
-
-  // Proyecto archivado: no se pueden marcar tareas como done
-  if (proyecto && proyecto.estado === 'archivado') return false;
-
-  // Sin membresía, no puede marcar como done
+export const canMarkDone = (user, task, membership, project) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isArchived(project)) return false;
   if (!membership) return false;
-
-  // project_admin puede marcar cualquier tarea como done
-  if (membership.role === 'project_admin') return true;
-
-  // developer y assignee pueden marcar solo sus propias tareas como done
-  if (membership.role === 'developer') {
-    // Si la tarea tiene assignee, solo el assignee puede marcar como done
-    if (tarea.assignee && tarea.assignee._id) {
-      return tarea.assignee._id === usuario.id;
-    }
-    // Si no hay assignee, el propietario puede marcar como done
-    return tarea.usuarioId === usuario.id;
+  if (isProjectAdmin(membership)) return true;
+  if (isDeveloper(membership)) {
+    const assigneeId = task?.assignee?._id || task?.assignee;
+    if (assigneeId) return String(assigneeId) === String(user.id);
+    const ownerId = task?.userId?._id || task?.userId;
+    return String(ownerId) === String(user.id);
   }
-
-  // viewer no puede marcar como done
   return false;
 };
 
 /**
- * Determina si un usuario puede editar un proyecto
- * @param {Object} usuario - Usuario actual
- * @param {Object} proyecto - Proyecto a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {Boolean}
+ * Determines whether the user may view the decrypted description of a
+ * sensitive task.  Only the assigned user and project_admin are authorised.
  */
-export const canEditProject = (usuario, proyecto, membership) => {
-  if (!usuario) return false;
-
-  // Super admin puede editar cualquier proyecto
-  if (usuario.rol === 'super_admin') return true;
-
-  // Proyecto archivado: no se puede editar
-  if (proyecto && proyecto.estado === 'archivado') return false;
-
-  // Creador del proyecto puede editarlo
-  if (proyecto && proyecto.creador === usuario.id) return true;
-
-  // project_admin puede editar
-  if (membership && membership.role === 'project_admin') return true;
-
+export const canViewSensitiveContent = (user, task, membership) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isProjectAdmin(membership)) return true;
+  // Assignee check — supports populated or flat assignee field
+  const assigneeId = task?.assignee?._id || task?.assignee;
+  if (assigneeId && String(assigneeId) === String(user.id)) return true;
   return false;
 };
 
+// ══════════════════════════════════════════════════════════════════════════
+// Project permissions
+// ══════════════════════════════════════════════════════════════════════════
+
 /**
- * Determina si un usuario puede ver botones de administración
- * @param {Object} usuario - Usuario actual
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {Boolean}
+ * Determines whether the user may edit project metadata.
  */
-export const isAdmin = (usuario, membership) => {
-  if (!usuario) return false;
-
-  // Super admin es siempre admin
-  if (usuario.rol === 'super_admin') return true;
-
-  // project_admin es admin en el proyecto
-  return membership && membership.role === 'project_admin';
+export const canEditProject = (user, project, membership) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  if (isArchived(project)) return false;
+  const ownerId = project?.ownerId?._id || project?.ownerId;
+  if (ownerId && String(ownerId) === String(user.id)) return true;
+  return isProjectAdmin(membership);
 };
 
-/**
- * Determina si un usuario es solo viewer
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {Boolean}
- */
-export const isViewer = (membership) => {
-  return membership && membership.role === 'viewer';
+// ══════════════════════════════════════════════════════════════════════════
+// Role classification helpers
+// ══════════════════════════════════════════════════════════════════════════
+
+/** Returns true when the user holds the project_admin or super_admin role. */
+export const isAdmin = (user, membership) => {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  return isProjectAdmin(membership);
 };
 
-/**
- * Determina si un usuario puede ver auditoría
- * @param {Object} usuario - Usuario actual
- * @returns {Boolean}
- */
-export const canViewAudit = (usuario) => {
-  if (!usuario) return false;
-  return usuario.rol === 'super_admin';
-};
+/** Returns true when the user is a read-only viewer in this project. */
+export const isViewer = (membership) => membership?.role === 'viewer';
+
+/** Returns true when the user can access global audit functionality. */
+export const canViewAudit = (user) => isSuperAdmin(user);
 
 /**
- * Obtiene el nivel de permisos como texto
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {String}
+ * Returns a human-readable label for the membership role.
  */
 export const getPermissionLevel = (membership) => {
-  if (!membership) return 'ninguno';
-  
-  const roleLabels = {
-    project_admin: 'Administrador',
-    developer: 'Desarrollador',
-    viewer: 'Visualizador'
+  const labels = {
+    project_admin: 'Administrator',
+    developer:     'Developer',
+    viewer:        'Viewer'
   };
-
-  return roleLabels[membership.role] || 'desconocido';
+  return labels[membership?.role] ?? 'None';
 };
 
 /**
- * Determina qué acciones puede realizar un usuario en una tarea
- * @param {Object} usuario - Usuario actual
- * @param {Object} tarea - Tarea a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @param {Object} proyecto - Proyecto actual
- * @returns {Object} Objeto con booleanos para cada acción
+ * Convenience aggregate: returns all action flags for a task in one call.
  */
-export const getTaskActions = (usuario, tarea, membership, proyecto) => {
-  return {
-    read: canReadTask(usuario, tarea, membership),
-    create: canCreateTask(usuario, membership, proyecto),
-    edit: canEditTask(usuario, tarea, membership, proyecto),
-    delete: canDeleteTask(usuario, tarea, membership, proyecto),
-    markDone: canMarkDone(usuario, tarea, membership, proyecto)
-  };
-};
+export const getTaskActions = (user, task, membership, project) => ({
+  read:     canReadTask(user, task, membership),
+  create:   canCreateTask(user, membership, project),
+  edit:     canEditTask(user, task, membership, project),
+  delete:   canDeleteTask(user, task, membership, project),
+  markDone: canMarkDone(user, task, membership, project)
+});
 
 /**
- * Determina qué acciones puede realizar un usuario en un proyecto
- * @param {Object} usuario - Usuario actual
- * @param {Object} proyecto - Proyecto a verificar
- * @param {Object} membership - Membresía del usuario en el proyecto
- * @returns {Object} Objeto con booleanos para cada acción
+ * Convenience aggregate: returns all action flags for a project in one call.
  */
-export const getProjectActions = (usuario, proyecto, membership) => {
-  return {
-    edit: canEditProject(usuario, proyecto, membership),
-    isAdmin: isAdmin(usuario, membership),
-    isViewer: isViewer(membership),
-    isArchived: proyecto && proyecto.estado === 'archivado'
-  };
-};
+export const getProjectActions = (user, project, membership) => ({
+  edit:       canEditProject(user, project, membership),
+  isAdmin:    isAdmin(user, membership),
+  isViewer:   isViewer(membership),
+  isArchived: isArchived(project)
+});

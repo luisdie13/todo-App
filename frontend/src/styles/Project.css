@@ -1,4 +1,4 @@
-/* Estilos para vista de proyecto con tabla de tareas - Dark Acentuado */
+/* Project view — task table, sensitive content masks, rate-limit banner */
 
 .project-header {
   display: flex;
@@ -520,6 +520,147 @@
   color: #e0e0e0;
   text-align: center;
   padding: 40px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Sensitive task visuals
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Table row with a left-border accent for sensitive tasks */
+.row-sensitive {
+  border-left: 3px solid #ff4757;
+}
+
+.col-description {
+  font-size: 13px;
+  color: #c0c0c0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+/* Locked placeholder shown to unauthorised users */
+.restricted-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(229, 9, 20, 0.08);
+  border: 1px dashed rgba(229, 9, 20, 0.4);
+  color: #ff4757;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: not-allowed;
+  user-select: none;
+}
+
+/* Description visible to authorised users of a sensitive task */
+.sensitive-visible {
+  color: #a3d977;
+  font-style: italic;
+}
+
+.task-description-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Rate-limit banner
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.alert-rate-limit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 193, 7, 0.08);
+  border-left: 4px solid #ffc107;
+  color: #ffc107;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.alert-rate-limit strong {
+  color: #ffe082;
+}
+
+.rate-limit-counter {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffe082;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-limit-dismiss {
+  background: none;
+  border: none;
+  color: #ffc107;
+  cursor: pointer;
+  font-size: 16px;
+  margin-left: auto;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.rate-limit-dismiss:hover {
+  opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Membership badge
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.membership-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: rgba(229, 9, 20, 0.1);
+  border: 1px solid rgba(229, 9, 20, 0.3);
+  color: #e0e0e0;
+}
+
+.membership-badge strong {
+  color: #ff6b7a;
+  text-transform: capitalize;
+}
+
+/* Viewer read-only notice */
+.viewer-notice {
+  background: rgba(23, 162, 184, 0.08) !important;
+  border-left-color: #17a2b8 !important;
+  color: #7fe3f0 !important;
+  margin-bottom: 24px;
+}
+
+.viewer-notice strong {
+  color: #17a2b8;
+}
+
+/* Alert info */
+.alert-info {
+  background: rgba(23, 162, 184, 0.08);
+  border-left: 4px solid #17a2b8;
+  color: #7fe3f0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Table layout updated to include description column
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 7-column layout: title | description | status | priority | assignee | due | actions */
+.tasks-table .table-header,
+.tasks-table .table-row {
+  grid-template-columns: 1.4fr 1.8fr 0.9fr 0.9fr 1.2fr 0.9fr 1fr;
 }
 
 /* Responsive */

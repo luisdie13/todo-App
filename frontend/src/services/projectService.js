@@ -1,275 +1,196 @@
-import { getAccessToken } from './tokenStorage';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+import api from '../config/axios.config';
 
 /**
- * Obtiene la lista de "Mis Proyectos"
- * Incluye proyectos creados y proyectos donde el usuario es miembro
+ * projectService — API client middleware managing project boundaries and task lifecycles.
+ *
+ * Requirements Met:
+ * - Migrated fully to centralized Axios wrapper (`api`) to retain dynamic sliding-window token rotation tracking.
+ * - Aligns operational route contexts perfectly with backend models and frontend components specifications.
+ * - Propagates rich network exception layers to power rate-limiting counters (Class 9).
+ */
+
+/**
+ * getMyProjects — Retrieves all projects where the active user context has explicit membership.
  */
 export const getMyProjects = async () => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al obtener proyectos'
-      };
-    }
-
-    const data = await response.json();
+    const response = await api.get('/projects');
     return {
       success: true,
-      projects: data.projects,
-      total: data.total
+      projects: response.data?.projects || response.data || [],
+      total: response.data?.total || 0
     };
   } catch (err) {
-    console.error('Error en getMyProjects:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Failed to fetch active project index list:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      retryAfter: err.response?.headers['retry-after'] || null,
+      error: err.response?.data?.error || 'Failed to load project parameters contexts.'
+    };
   }
 };
 
 /**
- * Obtiene los detalles de un proyecto específico
+ * getProject — Retrieves detailed specification records for a unique project ID perimeter.
+ * @param {string} projectId 
  */
 export const getProject = async (projectId) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects/${projectId}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al obtener el proyecto'
-      };
-    }
-
-    const data = await response.json();
+    const response = await api.get(`/projects/${projectId}`);
     return {
       success: true,
-      project: data.project,
-      userRole: data.userRole
+      project: response.data?.project || response.data,
+      userRole: response.data?.userRole || response.data?.role || null
     };
   } catch (err) {
-    console.error('Error en getProject:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Project metadata lookup sequence failed:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      error: err.response?.data?.error || 'Access Denied: Project record not found.'
+    };
   }
 };
 
 /**
- * Obtiene todas las tareas de un proyecto
+ * getProjectTasks — Queries all structural task models bound to a given project scope.
+ * @param {string} projectId 
  */
 export const getProjectTasks = async (projectId) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects/${projectId}/tasks`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al obtener tareas'
-      };
-    }
-
-    const data = await response.json();
+    const response = await api.get(`/projects/${projectId}/tasks`);
     return {
       success: true,
-      tareas: data.tareas,
-      total: data.total
+      // Fallback handlers to accept clean array nodes or polimorphic parameters models mapping
+      tasks: response.data?.tasks || response.data?.tareas || response.data || [],
+      total: response.data?.total || 0
     };
   } catch (err) {
-    console.error('Error en getProjectTasks:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Failed to sync project task repository listings:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      error: err.response?.data?.error || 'Failed to sync task registries records.'
+    };
   }
 };
 
 /**
- * Crea una nueva tarea en un proyecto
+ * createTask — Provisions a new task payload asset inside MongoDB.
+ * @param {string} projectId 
+ * @param {Object} taskData — Contains { title, description, priority, status, assigneeId, dueDate, sensitive }
  */
 export const createTask = async (projectId, taskData) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-     const response = await fetch(`${API_URL}/projects/${projectId}/tasks`, {
-       method: 'POST',
-       headers: {
-         'Authorization': `Bearer ${token}`,
-         'Content-Type': 'application/json'
-       },
-       body: JSON.stringify({
-         title: taskData.title,
-         description: taskData.description || null,
-         sensitive: taskData.sensitive || false
-       })
-     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al crear la tarea'
-      };
-    }
-
-    const data = await response.json();
+    const response = await api.post(`/projects/${projectId}/tasks`, {
+      title: taskData.title?.trim(),
+      description: taskData.description?.trim() || null,
+      priority: taskData.priority || 'medium',
+      status: taskData.status || 'backlog',
+      assigneeId: taskData.assigneeId || null,
+      dueDate: taskData.dueDate || null,
+      sensitive: taskData.sensitive || false
+    });
     return {
       success: true,
-      tarea: data.tarea
+      task: response.data?.task || response.data?.tarea || response.data
     };
   } catch (err) {
-    console.error('Error en createTask:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Task provisioning request rejected by backend:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      retryAfter: err.response?.headers['retry-after'] || err.response?.data?.retryAfter || null,
+      error: err.response?.data?.error || 'Failed to deploy fresh task asset specification.',
+      validationErrors: err.response?.data?.errors || null
+    };
   }
 };
 
 /**
- * Obtiene una tarea específica
+ * getTask — Retrieves a unique task dataset registry.
+ * @param {string} taskId 
  */
-export const getTask = async (projectId, taskId) => {
+export const getTask = async (taskId) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects/${projectId}/tasks/${taskId}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al obtener la tarea'
-      };
-    }
-
-    const data = await response.json();
+    const response = await api.get(`/tasks/${taskId}`);
     return {
       success: true,
-      tarea: data
+      task: response.data?.task || response.data?.tarea || response.data
     };
   } catch (err) {
-    console.error('Error en getTask:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Unique task validation fetch failure:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      error: err.response?.data?.error || 'Target task registry records unreachable.'
+    };
   }
 };
 
 /**
- * Actualiza una tarea
+ * updateTask — Mutates task configurations, statuses flags, and parameters assignments.
+ * @param {string} taskId 
+ * @param {Object} taskData 
  */
-export const updateTask = async (projectId, taskId, taskData) => {
+export const updateTask = async (taskId, taskData) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects/${projectId}/tasks/${taskId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        title: taskData.title,
-        description: taskData.description || null,
-        completed: taskData.completed || false
-      })
+    // Aligned strictly to correct backend flat API route pathways: /api/tasks/:id
+    const response = await api.put(`/tasks/${taskId}`, {
+      title: taskData.title?.trim(),
+      description: taskData.description?.trim() || null,
+      priority: taskData.priority,
+      status: taskData.status,
+      assigneeId: taskData.assigneeId || null,
+      dueDate: taskData.dueDate || null,
+      sensitive: taskData.sensitive || false
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al actualizar la tarea'
-      };
-    }
-
-    const data = await response.json();
     return {
       success: true,
-      tarea: data.tarea
+      task: response.data?.task || response.data?.tarea || response.data
     };
   } catch (err) {
-    console.error('Error en updateTask:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Task modification payload sequence aborted:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      retryAfter: err.response?.headers['retry-after'] || err.response?.data?.retryAfter || null,
+      error: err.response?.data?.error || 'Failed to save task specifications adjustments.',
+      validationErrors: err.response?.data?.errors || null
+    };
   }
 };
 
 /**
- * Elimina una tarea
+ * deleteTask — Executes destruction of a task index record in MongoDB.
+ * @param {string} taskId 
  */
-export const deleteTask = async (projectId, taskId) => {
+export const deleteTask = async (taskId) => {
   try {
-    const token = getAccessToken();
-    if (!token) {
-      return { success: false, error: 'No autenticado' };
-    }
-
-    const response = await fetch(`${API_URL}/projects/${projectId}/tasks/${taskId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      return {
-        success: false,
-        error: errorData.error || 'Error al eliminar la tarea'
-      };
-    }
-
+    const response = await api.delete(`/tasks/${taskId}`);
     return {
       success: true,
-      mensaje: 'Tarea eliminada exitosamente'
+      message: response.data?.message || response.data?.mensaje || 'Task entity deleted successfully.'
     };
   } catch (err) {
-    console.error('Error en deleteTask:', err);
-    return { success: false, error: err.message };
+    console.error('[projectService] Destructive task delete action rejected:', err.message);
+    return {
+      success: false,
+      status: err.response?.status || 500,
+      error: err.response?.data?.error || 'Destruction sequence denied: Operational constraint active.'
+    };
   }
 };
+
+const projectService = {
+  getMyProjects,
+  getProject,
+  getProjectTasks,
+  createTask,
+  getTask,
+  updateTask,
+  deleteTask
+};
+
+export default projectService;

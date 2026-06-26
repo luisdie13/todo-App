@@ -1,0 +1,93 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   Toast.css — slide-in toast notification stack
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 440px;
+  pointer-events: none; /* let clicks pass through the container */
+}
+
+/* ── Individual toast ─────────────────────────────────────────────────────── */
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #1a1a2e;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  animation: toastSlideIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: all;
+  min-width: 280px;
+  border: 1px solid #2a2a3e;
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ── Type variants (left border accent) ──────────────────────────────────── */
+.toast--success { border-left: 4px solid #00c853; }
+.toast--error   { border-left: 4px solid #ff4757; }
+.toast--warning { border-left: 4px solid #ffc107; }
+.toast--info    { border-left: 4px solid #2196f3; }
+
+/* ── Icon ─────────────────────────────────────────────────────────────────── */
+.toast__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  line-height: 1.45;
+}
+
+/* ── Message ──────────────────────────────────────────────────────────────── */
+.toast__message {
+  flex: 1;
+  color: #e0e0e0;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+/* ── Dismiss button ───────────────────────────────────────────────────────── */
+.toast__dismiss {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 0 0 8px;
+  line-height: 1;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 1px;
+  transition: color 0.15s;
+}
+
+.toast__dismiss:hover {
+  color: #e0e0e0;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .toast-container {
+    top: auto;
+    bottom: 20px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
+}

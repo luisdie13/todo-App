@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import DOMPurify from 'dompurify';
 import {
   canEditTask,
   canDeleteTask,
@@ -9,123 +10,181 @@ import {
 import CommentSection from './CommentSection';
 
 /**
- * Componente TaskCard
- * Muestra una tarea con botones de acción basados en permisos ABAC
- * 
+ * TaskCard Component
+ * Displays a single task unit enforcing rigorous runtime ABAC protections
+ * and OWASP sanitization baselines before injection into the DOM tree.
+ *
  * Props:
- * - tarea: Objeto de tarea
- * - usuario: Usuario actual
- * - membership: Membresía del usuario en el proyecto
- * - proyecto: Proyecto actual
- * - onEdit: Callback para editar
- * - onDelete: Callback para eliminar
- * - onMarkDone: Callback para marcar como completada
+ * - task: Task data entity from database registry
+ * - user: Authenticated global system user object
+ * - membership: User context role inside this project
+ * - project: Parent project schema containing status metadata
+ * - onEdit: Callback function to trigger task mutation
+ * - onDelete: Callback function to trigger data destruction
+ * - onMarkDone: Callback function to transition status to 'done'
  */
 const TaskCard = ({
-  tarea,
-  usuario,
+  task,
+  user,
   membership,
-  proyecto,
+  project,
   onEdit,
   onDelete,
   onMarkDone
 }) => {
-  const [mostrarComentarios, setMostrarComentarios] = useState(false);
-  // Obtener permisos para esta tarea
-  const actions = getTaskActions(usuario, tarea, membership, proyecto);
+  const [showComments, setShowComments] = useState(false);
   
-  // Determinar si el usuario es solo viewer
-  const soloViewer = isViewer(membership);
+  // Resolve runtime ABAC permissions layout matrix for this specific task
+  const actions = getTaskActions(user, task, membership, project);
+  
+  // Verify context permission restrictions
+  const isOnlyViewer = isViewer(membership);
 
-  // Si no tiene permiso para leer, no mostrar
+  // Terminate execution pipeline early if the actor fails cross-origin read authorization
   if (!actions.read) {
     return null;
   }
 
+  // ── DOMPurify Sanitization Helper ──────────────────────────────────────────
+  const sanitize = (value) => {
+    if (!value) return '';
+    return DOMPurify.sanitize(String(value), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+  };
+
+  // ── ABAC Sensitivity Context Evaluator (Rule 6) ───────────────────────────
+  const hasAccessToSensitiveContent = () => {
+    if (!task.sensitive) return true;
+    
+    // Explicit project admin role grant
+    const isProjectAdmin = membership?.role === 'project_admin';
+    
+    // Explicit task assignee identity verification
+    const assigneeId = task.assigneeId || task.assignee?._id || task.assignee;
+    const isAssignee = user && assigneeId && String(user._id || user.id) === String(assigneeId);
+    
+    return isProjectAdmin || isAssignee;
+  };
+
+  const isProjectArchived = project?.status === 'archived';
+  const hasAccess = hasAccessToSensitiveContent();
+
+  // Sanitize data nodes to eliminate injection/XSS vectors
+  const cleanTitle = sanitize(task.title);
+  const rawDescription = hasAccess 
+    ? (task.description || '') 
+    : '🔒 [RESTRICTED CONTENT] — Unauthorized contextual role permissions.';
+  const cleanDescription = sanitize(rawDescription);
+  const assigneeEmail = sanitize(task.assignee?.email || task.assignee);
+
   return (
-    <div className={`task-card ${tarea.completed ? 'completed' : ''} ${proyecto?.estado === 'archivado' ? 'archived' : ''}`}>
+    <div className={`task-card ${task.status === 'done' ? 'completed' : ''} ${isProjectArchived ? 'archived' : ''}`}>
       <div className="task-header">
-        <h3 className="task-title">{tarea.title}</h3>
-        {proyecto?.estado === 'archivado' && (
-          <span className="badge badge-archived">Archivado</span>
+        <h3 className="task-title">{cleanTitle}</h3>
+        
+        {isProjectArchived && (
+          <span className="badge badge-archived">Archived</span>
         )}
-        {tarea.assignee && (
-          <span className="badge badge-info">Asignado a: {tarea.assignee.email}</span>
+        
+        {task.assignee && (
+          <span className="badge badge-info">Assignee: {assigneeEmail}</span>
         )}
       </div>
 
-      {tarea.description && (
-        <p className="task-description">{tarea.description}</p>
+      {cleanDescription && (
+        <p className={`task-description ${!hasAccess ? 'desc-restricted' : ''}`}>
+          {cleanDescription}
+        </p>
       )}
 
-      {tarea.sensitive && (
-        <div className="alert alert-warning">
-          ⚠️ Esta tarea contiene información sensible (cifrada)
+      {task.sensitive && (
+        <div className="alert alert-warning-sensitive" role="alert">
+          🛡️ This task contains encrypted sensitive information (AES-256-GCM).
         </div>
       )}
 
       <div className="task-meta">
-        <small>Creado por: {tarea.usuarioId?.email || 'Usuario desconocido'}</small>
-        <small>{new Date(tarea.createdAt).toLocaleDateString()}</small>
+        <small>Created by: {sanitize(task.reporterId?.email || task.userId?.email || 'System')}</small>
+        <small>{new Date(task.createdAt).toLocaleDateString()}</small>
       </div>
 
       <div className="task-actions">
-        {/* Botón para marcar como completada */}
-        {actions.markDone && !tarea.completed && (
+        {/* Toggle 'done' state — Subject to Rule 3 validation rules */}
+        {actions.markDone && task.status !== 'done' && (
           <button
             className="btn btn-success btn-sm"
-            onClick={() => onMarkDone(tarea._id)}
-            title="Marcar como completada"
+            onClick={() => onMarkDone(task._id)}
+            disabled={isProjectArchived}
+            title="Mark task as completed"
+            type="button"
           >
-            ✓ Completar
+            ✓ Complete
           </button>
         )}
 
-        {/* Mostrar estado completado */}
-        {tarea.completed && (
-          <span className="badge badge-success">Completada</span>
+        {task.status === 'done' && (
+          <span className="badge badge-success">Completed</span>
         )}
 
-        {/* Botón para editar */}
-        {actions.edit && (
+        {/* Edit Action — Disabled automatically if project is archived */}
+        {actions.edit && !isProjectArchived && (
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => onEdit(tarea._id)}
-            title="Editar tarea"
+            onClick={() => onEdit(task._id)}
+            title="Edit task parameters"
+            type="button"
           >
-            ✏️ Editar
+            ✏️ Edit
           </button>
         )}
 
-        {/* Botón para eliminar */}
+        {/* Delete Action — Controlled by project_admin rule parameters */}
         {actions.delete && (
           <button
             className="btn btn-danger btn-sm"
             onClick={() => {
-              if (window.confirm('¿Estás seguro de que deseas eliminar esta tarea?')) {
-                onDelete(tarea._id);
+              if (window.confirm('Are you sure you want to permanently delete this task?')) {
+                onDelete(task._id);
               }
             }}
-            title="Eliminar tarea"
+            title="Delete task entity"
+            type="button"
           >
-            🗑️ Eliminar
+            🗑️ Delete
           </button>
         )}
 
-        {/* Mensaje para viewers */}
-        {soloViewer && (
-          <div className="alert alert-info">
-            ℹ️ Tienes acceso de lectura. No puedes editar esta tarea.
+        {/* Context role messages */}
+        {isOnlyViewer && (
+          <div className="alert alert-info-view" role="alert">
+            ℹ️ Read-Only Session: Your context role restricts modifications.
           </div>
         )}
 
-        {/* Advertencia para proyecto archivado */}
-        {proyecto?.estado === 'archivado' && (
-          <div className="alert alert-warning">
-            ⚠️ Este proyecto está archivado. No puedes realizar cambios.
+        {isProjectArchived && (
+          <div className="alert alert-danger-archived" role="alert">
+            ⚠️ Locked: This project is archived. Task mutations and comments are disabled.
           </div>
         )}
       </div>
+
+      {/* Comment Section — Render configuration conditional */}
+      <div className="task-comments-toggle">
+        <button 
+          className="btn-link-comments" 
+          onClick={() => setShowComments(!showComments)}
+          type="button"
+        >
+          {showComments ? '▲ Hide Comments' : `▼ View Comments`}
+        </button>
+      </div>
+
+      {showComments && (
+        <CommentSection 
+          taskId={task._id} 
+          isArchived={isProjectArchived} 
+          user={user} 
+        />
+      )}
     </div>
   );
 };

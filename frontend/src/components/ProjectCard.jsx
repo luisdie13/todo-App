@@ -1,134 +1,152 @@
 import React from 'react';
-import {
-  canEditProject,
-  isAdmin,
-  getProjectActions
-} from '../utils/permissions';
+import { Link } from 'react-router-dom';
+import DOMPurify from 'dompurify';
+import { getProjectActions } from '../utils/permissions';
 
 /**
- * Componente ProjectCard
- * Muestra un proyecto con botones de acción basados en permisos ABAC
- * 
+ * ProjectCard Component
+ * Renders an organization project unit applying strict contextual ABAC parameters
+ * and sanitization filters to mitigate XSS vulnerabilities.
+ *
  * Props:
- * - proyecto: Objeto de proyecto
- * - usuario: Usuario actual
- * - membership: Membresía del usuario en el proyecto
- * - onEdit: Callback para editar
- * - onDelete: Callback para eliminar
- * - onArchive: Callback para archivar
- * - onUnarchive: Callback para desarchivar
+ * - project: Project metadata schema object from database registry
+ * - user: Authenticated global system user entity from memory store
+ * - membership: User context role assigned within this project scope
+ * - onEdit: Callback function to trigger project name/description updates
+ * - onDelete: Destructive callback to purge project dataset records
+ * - onArchive: Callback function to lock project transitions to 'archived'
+ * - onUnarchive: Callback function to restore project status to 'active'
  */
 const ProjectCard = ({
-  proyecto,
-  usuario,
+  project,
+  user,
   membership,
   onEdit,
   onDelete,
   onArchive,
   onUnarchive
 }) => {
-  // Obtener permisos para este proyecto
-  const actions = getProjectActions(usuario, proyecto, membership);
+  // Resolve runtime ABAC permission layout matrix for this specific project context
+  const actions = getProjectActions(user, project, membership);
+  
+  const isSuperAdmin = user?.role === 'super_admin';
+  const isProjectArchived = project?.status === 'archived';
+
+  // ── DOMPurify Strict Plain Text Helper ────────────────────────────────────
+  const sanitize = (value) => {
+    if (!value) return '';
+    return DOMPurify.sanitize(String(value), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).trim();
+  };
+
+  // Safe data properties sanitization
+  const cleanName = sanitize(project.name);
+  const cleanDescription = sanitize(project.description);
+  const creatorEmail = sanitize(project.creator?.email || project.createdBy?.email || 'Workspace System');
+  const contextRole = sanitize(membership?.role || 'viewer');
 
   return (
-    <div className={`project-card ${proyecto.estado === 'archivado' ? 'archived' : ''}`}>
+    <div className={`project-card ${isProjectArchived ? 'archived' : ''}`}>
       <div className="project-header">
-        <h2 className="project-title">{proyecto.name}</h2>
-        {proyecto.estado === 'archivado' && (
-          <span className="badge badge-secondary">Archivado</span>
-        )}
-        {proyecto.estado === 'inactivo' && (
-          <span className="badge badge-warning">Inactivo</span>
-        )}
-        {proyecto.estado === 'activo' && (
-          <span className="badge badge-success">Activo</span>
+        <h2 className="project-title">{cleanName}</h2>
+        
+        {/* Enforces strict alignment with database schema field configurations (active/archived) */}
+        {isProjectArchived ? (
+          <span className="badge status-archived">Archived</span>
+        ) : (
+          <span className="badge status-active">Active</span>
         )}
       </div>
 
-      {proyecto.description && (
-        <p className="project-description">{proyecto.description}</p>
+      {cleanDescription && (
+        <p className="project-description">{cleanDescription}</p>
       )}
 
       <div className="project-meta">
-        <small>Creado por: {proyecto.creador?.email || 'Usuario desconocido'}</small>
-        <small>{new Date(proyecto.createdAt).toLocaleDateString()}</small>
+        <small>Created by: {creatorEmail}</small>
+        <small>{new Date(project.createdAt).toLocaleDateString()}</small>
         {membership && (
-          <small>Tu rol: {membership.role === 'project_admin' ? 'Administrador' : membership.role === 'developer' ? 'Desarrollador' : 'Visualizador'}</small>
+          <small>
+            Context Role: <strong>{contextRole.toUpperCase().replace('_', ' ')}</strong>
+          </small>
         )}
       </div>
 
-      {proyecto.estado === 'archivado' && (
-        <div className="alert alert-info">
-          ℹ️ Este proyecto está archivado y es de solo lectura. No se pueden realizar cambios.
+      {isProjectArchived && (
+        <div className="alert alert-info-read-only" role="alert">
+          ℹ️ <strong>Archived Perimeter:</strong> This project metadata is locked as read-only. Modifications are restricted.
         </div>
       )}
 
       <div className="project-actions">
-        {/* Botón para entrar al proyecto */}
-        <a href={`/projects/${proyecto._id}`} className="btn btn-primary">
-          📂 Ver Proyecto
-        </a>
+        {/* Secure SPA Route Passage — Replaced native anchors to protect in-memory token states */}
+        <Link to={`/project/${project._id}`} className="btn btn-primary">
+          📂 View Project Tasks
+        </Link>
 
-        {/* Botón para editar proyecto */}
-        {actions.edit && proyecto.estado !== 'archivado' && (
+        {/* Edit Action — Enforces contextual lock parameter verification */}
+        {actions.edit && !isProjectArchived && (
           <button
             className="btn btn-warning btn-sm"
-            onClick={() => onEdit(proyecto._id)}
-            title="Editar proyecto"
+            onClick={() => onEdit(project._id)}
+            title="Edit project designation metadata"
+            type="button"
           >
-            ✏️ Editar
+            ✏️ Edit
           </button>
         )}
 
-        {/* Botón para archivar proyecto */}
-        {actions.isAdmin && proyecto.estado !== 'archivado' && (
+        {/* Archive Process — Subject to project_admin or org_admin constraints */}
+        {(actions.isAdmin || isSuperAdmin) && !isProjectArchived && (
           <button
             className="btn btn-secondary btn-sm"
             onClick={() => {
-              if (window.confirm('¿Deseas archivar este proyecto? Se volverá de solo lectura.')) {
-                onArchive(proyecto._id);
+              if (window.confirm('Are you sure you want to archive this project context? All underlying assets will transition to Read-Only mode.')) {
+                onArchive(project._id);
               }
             }}
-            title="Archivar proyecto"
+            title="Archive project boundary"
+            type="button"
           >
-            📦 Archivar
+            📦 Archive
           </button>
         )}
 
-        {/* Botón para desarchivar proyecto */}
-        {(actions.isAdmin || usuario?.rol === 'super_admin') && proyecto.estado === 'archivado' && (
+        {/* Unarchive Reversal — Granted exclusively to authorized admins */}
+        {(actions.isAdmin || isSuperAdmin) && isProjectArchived && (
           <button
             className="btn btn-info btn-sm"
             onClick={() => {
-              if (window.confirm('¿Deseas desarchivar este proyecto?')) {
-                onUnarchive(proyecto._id);
+              if (window.confirm('Do you want to restore and activate this project pipeline?')) {
+                onUnarchive(project._id);
               }
             }}
-            title="Desarchivar proyecto"
+            title="Restore project activity"
+            type="button"
           >
-            📂 Desarchivar
+            📂 Restore Active Status
           </button>
         )}
 
-        {/* Botón para eliminar proyecto (solo creador o super_admin) */}
-        {(proyecto.creador?._id === usuario?.id || usuario?.rol === 'super_admin') && (
+        {/* Destructive Deletion Action — Restricted according to strict creator rules */}
+        {(project.creatorId === user?._id || project.creator?._id === user?._id || isSuperAdmin) && (
           <button
             className="btn btn-danger btn-sm"
             onClick={() => {
-              if (window.confirm('¿Estás seguro de que deseas eliminar este proyecto? Esta acción no se puede deshacer.')) {
-                onDelete(proyecto._id);
+              if (window.confirm('CRITICAL WARN: Are you sure you want to permanently purge this project entity? This process cannot be undone.')) {
+                onDelete(project._id);
               }
             }}
-            title="Eliminar proyecto"
+            title="Permanently purge project data"
+            type="button"
           >
-            🗑️ Eliminar
+            🗑️ Delete
           </button>
         )}
 
-        {/* Mensaje para viewers */}
-        {actions.isViewer && (
-          <div className="alert alert-info">
-            ℹ️ Tienes acceso de lectura. No puedes editar este proyecto.
+        {/* View-Only Explicit Inline Warning Banner */}
+        {contextRole === 'viewer' && (
+          <div className="alert alert-info-view-notice" role="alert">
+            ℹ️ View-Only Session: Your context role scope blocks write access parameters.
           </div>
         )}
       </div>

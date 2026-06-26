@@ -2,277 +2,231 @@ import { useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 
 /**
- * Hook personalizado para verificar permisos de usuario
- * Proporciona funciones para determinar qué acciones puede realizar el usuario
- * 
- * Retorna un objeto con métodos para verificar permisos:
- * - isOrgAdmin(organization): ¿Es administrador de la organización?
- * - isProjectAdmin(project): ¿Es administrador del proyecto?
- * - isTaskAssignee(task): ¿Está asignado a esta tarea?
- * - isTaskCreator(task): ¿Creó esta tarea?
- * - canEditTask(task, project): ¿Puede editar esta tarea?
- * - canDeleteTask(task): ¿Puede eliminar esta tarea?
- * - canCreateTask(project): ¿Puede crear tareas en este proyecto?
- * - canArchiveProject(project): ¿Puede archivar este proyecto?
+ * usePermissions Hook — Core Client-Side ABAC Enforcement Engine.
+ * Enforces technical guidelines:
+ * - Solves identity alignment issues by using authoritative MongoDB mapping references (_id).
+ * - Implements Rule 4 governance criteria by locking mutations if a project is 'archived'.
+ * - Controls localized context permission states before sending payload streams to Axios.
  */
 export const usePermissions = () => {
   const { user } = useContext(AuthContext);
 
+  // Authoritative identity reference extractor
+  const getUserId = () => user?._id || user?.id || null;
+
   /**
-   * Verifica si el usuario es administrador de una organización
-   * @param {Object} organization - La organización a verificar
-   * @returns {boolean}
+   * isOrgAdmin — Evaluates if the actor holds administrative metrics over an organization perimeter.
    */
   const isOrgAdmin = (organization) => {
-    if (!user || !organization) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !organization) return false;
     
-    // El creador de la organización es admin
-    if (organization.ownerId === user.id || organization.ownerId?._id === user.id) {
+    // Explicit organization owner validation
+    const ownerId = organization.ownerId?._id || organization.ownerId || organization.orgOwnerId;
+    if (ownerId && String(ownerId) === String(currentUserId)) {
       return true;
     }
     
-    // Verificar si está en los miembros con rol org_admin
+    // Scan structure arrays for explicit org_admin properties flags
     if (organization.members && Array.isArray(organization.members)) {
-      return organization.members.some(m => 
-        (m.userId === user.id || m.userId?._id === user.id) && 
-        (m.role === 'org_admin' || m.role === 'admin')
-      );
+      return organization.members.some(m => {
+        const memberUserId = m.userId?._id || m.userId;
+        return String(memberUserId) === String(currentUserId) && 
+               (m.role === 'org_admin' || m.role === 'admin');
+      });
     }
     
     return false;
   };
 
   /**
-   * Verifica si el usuario es administrador de un proyecto
-   * @param {Object} project - El proyecto a verificar
-   * @returns {boolean}
+   * isProjectAdmin — Evaluates project-level administrative rights.
    */
   const isProjectAdmin = (project) => {
-    if (!user || !project) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !project) return false;
     
-    // El creador del proyecto es admin
-    if (project.ownerId === user.id || project.ownerId?._id === user.id) {
+    // Explicit project creator/owner validation
+    const ownerId = project.ownerId?._id || project.ownerId || project.creatorId || project.creator?._id;
+    if (ownerId && String(ownerId) === String(currentUserId)) {
       return true;
     }
     
-    // Verificar si está en los miembros con rol project_admin
+    // Membership array verification layer
     if (project.members && Array.isArray(project.members)) {
-      return project.members.some(m => 
-        (m.userId === user.id || m.userId?._id === user.id) && 
-        m.role === 'project_admin'
-      );
+      return project.members.some(m => {
+        const memberUserId = m.userId?._id || m.userId;
+        return String(memberUserId) === String(currentUserId) && m.role === 'project_admin';
+      });
     }
     
     return false;
   };
 
   /**
-   * Verifica si el usuario está asignado a una tarea
-   * @param {Object} task - La tarea a verificar
-   * @returns {boolean}
+   * isTaskAssignee — Asserts if the logged user matches the operational assignee profile.
    */
   const isTaskAssignee = (task) => {
-    if (!user || !task) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !task) return false;
     
-    if (!task.assignee) return false;
-    
-    return task.assignee === user.id || task.assignee?._id === user.id;
+    const assigneeId = task.assigneeId || task.assignee?._id || task.assignee;
+    return assigneeId && String(assigneeId) === String(currentUserId);
   };
 
   /**
-   * Verifica si el usuario es el creador de una tarea
-   * @param {Object} task - La tarea a verificar
-   * @returns {boolean}
+   * isTaskCreator — Asserts if the user is the original creator of the task model asset.
    */
   const isTaskCreator = (task) => {
-    if (!user || !task) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !task) return false;
     
-    if (!task.usuarioId) return false;
-    
-    return task.usuarioId === user.id || task.usuarioId?._id === user.id;
+    const creatorId = task.reporterId || task.userId?._id || task.userId || task.usuarioId?._id || task.usuarioId;
+    return creatorId && String(creatorId) === String(currentUserId);
   };
 
   /**
-   * Verifica si el usuario puede editar una tarea
-   * Puede editar si es: creador, asignado, o admin del proyecto
-   * @param {Object} task - La tarea a verificar
-   * @param {Object} project - El proyecto que contiene la tarea (opcional)
-   * @returns {boolean}
+   * canEditTask — Subject to Rule 4 constraints. 
+   * Actions are blocked natively if the parent project metadata contains status === 'archived'.
    */
   const canEditTask = (task, project) => {
-    if (!user || !task) return false;
+    if (!task) return false;
     
-    // Puede editar si es el creador
+    // Rule 4 Compliance Check: Archived perimeters deny structural state mutations
+    if (project?.status === 'archived') return false;
+    
     if (isTaskCreator(task)) return true;
-    
-    // Puede editar si está asignado
     if (isTaskAssignee(task)) return true;
-    
-    // Puede editar si es admin del proyecto
     if (project && isProjectAdmin(project)) return true;
     
     return false;
   };
 
   /**
-   * Verifica si el usuario puede eliminar una tarea
-   * Solo el creador o admin del proyecto pueden eliminar
-   * @param {Object} task - La tarea a verificar
-   * @param {Object} project - El proyecto que contiene la tarea (opcional)
-   * @returns {boolean}
+   * canDeleteTask — Restricted to project admins or task owners under active states.
    */
   const canDeleteTask = (task, project) => {
-    if (!user || !task) return false;
+    if (!task) return false;
     
-    // El creador puede eliminar
+    // Rule 4 Protection Layer
+    if (project?.status === 'archived') return false;
+    
     if (isTaskCreator(task)) return true;
-    
-    // El admin del proyecto puede eliminar
     if (project && isProjectAdmin(project)) return true;
     
     return false;
   };
 
-   /**
-     * Verifica si el usuario puede crear tareas en un proyecto
-     * @param {Object} project - El proyecto a verificar
-     * @returns {boolean}
-     */
-    const canCreateTask = (project) => {
-      if (!user || !project) return false;
+  /**
+   * canCreateTask — Evaluates membership arrays to confirm assignment authorizations.
+   */
+  const canCreateTask = (project) => {
+    const currentUserId = getUserId();
+    if (!currentUserId || !project) return false;
+    
+    // Rule 4 Protection Layer: Locked projects deny new task additions
+    if (project.status === 'archived') return false;
+    
+    if (isProjectAdmin(project)) return true;
+    
+    if (project.members && Array.isArray(project.members)) {
+      const member = project.members.find(m => {
+        const memberUserId = m.userId?._id || m.userId;
+        return String(memberUserId) === String(currentUserId);
+      });
       
-      // El admin del proyecto puede crear tareas
-      if (isProjectAdmin(project)) return true;
-      
-      // El creador/owner del proyecto puede crear tareas
-      if (project.ownerId === user.id || project.ownerId?._id === user.id) {
+      if (member && (member.role === 'developer' || member.role === 'project_admin')) {
         return true;
       }
-      
-      // Los developers pueden crear tareas (buscar en project.members como fallback)
-      // NOTA: Este es un fallback para casos donde project.members está poblado desde el frontend
-      if (project.members && Array.isArray(project.members)) {
-        const member = project.members.find(m => 
-          m.userId === user.id || m.userId?._id === user.id
-        );
-        
-        if (member && (member.role === 'developer' || member.role === 'project_admin')) {
-          return true;
-        }
-      }
-      
-      // RESTRICCIÓN ESTRICTA: No permitir crear tareas sin verificar membresía explícita
-      // El usuario DEBE ser project_admin, owner, o developer registrado en project.members
-      // El backend hará la validación final como segunda línea de defensa
-      return false;
-    };
+    }
+    
+    return false;
+  };
 
   /**
-   * Verifica si el usuario puede archivar un proyecto
-   * Solo el creador/admin pueden archivar
-   * @param {Object} project - El proyecto a verificar
-   * @returns {boolean}
+   * canArchiveProject — Restricts status adjustments to authorized context roles.
    */
   const canArchiveProject = (project) => {
-    if (!user || !project) return false;
-    
     return isProjectAdmin(project);
   };
 
   /**
-   * Verifica si el usuario puede archivar una organización
-   * @param {Object} organization - La organización a verificar
-   * @returns {boolean}
+   * canArchiveOrganization — Validates context metrics before triggering organization lockouts.
    */
   const canArchiveOrganization = (organization) => {
-    if (!user || !organization) return false;
-    
     return isOrgAdmin(organization);
   };
 
   /**
-   * Verifica si el usuario puede eliminar una organización
-   * @param {Object} organization - La organización a verificar
-   * @returns {boolean}
+   * canDeleteOrganization — Reserved exclusively for the supreme structural owner.
    */
   const canDeleteOrganization = (organization) => {
-    if (!user || !organization) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !organization) return false;
     
-    // Solo el dueño puede eliminar
-    return organization.ownerId === user.id || organization.ownerId?._id === user.id;
+    const ownerId = organization.ownerId?._id || organization.ownerId || organization.orgOwnerId;
+    return ownerId && String(ownerId) === String(currentUserId);
   };
 
   /**
-   * Verifica si el usuario puede eliminar un proyecto
-   * @param {Object} project - El proyecto a verificar
-   * @returns {boolean}
+   * canDeleteProject — Restricts full project drops to database owners.
    */
   const canDeleteProject = (project) => {
-    if (!user || !project) return false;
+    const currentUserId = getUserId();
+    if (!currentUserId || !project) return false;
     
-    // Solo el dueño puede eliminar
-    return project.ownerId === user.id || project.ownerId?._id === user.id;
+    const ownerId = project.ownerId?._id || project.ownerId || project.creatorId;
+    return ownerId && String(ownerId) === String(currentUserId);
   };
 
   /**
-   * Verifica si el usuario puede invitar miembros a una organización
-   * @param {Object} organization - La organización a verificar
-   * @returns {boolean}
+   * canInviteMember — Restricts resource invitations parameters.
    */
   const canInviteMember = (organization) => {
-    if (!user || !organization) return false;
-    
     return isOrgAdmin(organization);
   };
 
   /**
-   * Verifica si el usuario puede editar comentarios (solo si es el creador)
-   * @param {Object} comment - El comentario a verificar
-   * @returns {boolean}
+   * canEditComment — Enforces comment ownership validations.
    */
-  const canEditComment = (comment) => {
-    if (!user || !comment) return false;
+  const canEditComment = (comment, project) => {
+    const currentUserId = getUserId();
+    if (!currentUserId || !comment) return false;
     
-    return comment.usuarioId === user.id || comment.usuarioId?._id === user.id;
+    // Rule 4 Compliance Check: Locked projects block comment mutations
+    if (project?.status === 'archived') return false;
+    
+    const authorId = comment.authorId?._id || comment.authorId || comment.userId || comment.usuarioId;
+    return authorId && String(authorId) === String(currentUserId);
   };
 
-   /**
-    * Verifica si el usuario puede eliminar comentarios (si es el creador)
-    * @param {Object} comment - El comentario a verificar
-    * @returns {boolean}
-    */
-   const canDeleteComment = (comment) => {
-     if (!user || !comment) return false;
-     
-     return comment.usuarioId === user.id || comment.usuarioId?._id === user.id;
-   };
+  /**
+   * canDeleteComment — Validates comment drop permissions.
+   */
+  const canDeleteComment = (comment, project) => {
+    const currentUserId = getUserId();
+    if (!currentUserId || !comment) return false;
+    
+    // Rule 4 Compliance Check: Locked projects block comment destruction processes
+    if (project?.status === 'archived') return false;
+    
+    const authorId = comment.authorId?._id || comment.authorId || comment.userId || comment.usuarioId;
+    const isCommentOwner = authorId && String(authorId) === String(currentUserId);
+    
+    // Context privilege backup: project admins can also drop comments within active boards
+    const isBoardAdmin = project && isProjectAdmin(project);
+    
+    return isCommentOwner || isBoardAdmin;
+  };
 
-   /**
-    * Verifica si el usuario puede crear proyectos en una organización
-    * Solo org_admin o el dueño pueden crear proyectos
-    * @param {Object} organization - La organización a verificar
-    * @returns {boolean}
-    */
-   const canCreateProject = (organization) => {
-     if (!user || !organization) return false;
-     
-     // El dueño puede crear proyectos
-     if (organization.ownerId === user.id || organization.ownerId?._id === user.id) {
-       return true;
-     }
-     
-     // Los org_admin pueden crear proyectos
-     if (organization.members && Array.isArray(organization.members)) {
-       return organization.members.some(m => 
-         (m.userId === user.id || m.userId?._id === user.id) && 
-         m.role === 'org_admin'
-       );
-     }
-     
-     return false;
-   };
+  /**
+   * canCreateProject — Restricts sub-context deployment properties inside the organization boundary.
+   */
+  const canCreateProject = (organization) => {
+    return isOrgAdmin(organization);
+  };
 
-   return {
+  return {
     isOrgAdmin,
     isProjectAdmin,
     isTaskAssignee,

@@ -111,8 +111,8 @@ class ABACEngine {
       // Without project, only authenticated users can create
       if (!project) return true;
 
-      // Archived project: cannot create tasks
-      if (project.status === 'archived') return false;
+       // Archived project: cannot create tasks
+       if (project.status === 'archived') return false;
 
       // Check membership
       const membership = await Membership.findOne({
@@ -339,13 +339,19 @@ class ABACEngine {
      this.registerPolicy('organization.edit', async (ctx) => {
        const { user, organization } = ctx;
 
-       // Super admin can edit any organization
-       if (user.role === 'super_admin') return true;
+       // Super admin cannot edit organization metadata unless explicitly a member or owner
+       if (user.role === 'super_admin') {
+         const isOwner = organization.ownerId.toString() === user.id;
+         const isOrgMember = organization.members.some(m => m.userId.toString() === user.id);
+         return isOwner || isOrgMember;
+       }
 
        if (!organization) return false;
 
-       // Only the organization owner can edit it
-       return organization.ownerId.toString() === user.id;
+       // Only the organization owner or an org_admin can edit it
+       const isOwner = organization.ownerId.toString() === user.id;
+       const isOrgAdmin = organization.members.some(m => m.userId.toString() === user.id && m.role === 'org_admin');
+       return isOwner || isOrgAdmin;
      });
 
      // ===== PROJECT CREATION POLICY =====
