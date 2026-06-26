@@ -1,28 +1,32 @@
 const express = require('express');
 const router = express.Router();
-
-// 1. Cambiar al middleware en inglés desestructurando la propiedad
 const { authentication } = require('../middleware/authentication');
 
+// Importamos el controlador
 const taskController = require('../controllers/task.controller');
+// Importamos el controlador de comentarios (asegúrate de que exista este archivo)
 const commentController = require('../controllers/comment.controller');
 
-// 2. Aplicar el middleware correcto a todas las rutas de este archivo
 router.use(authentication);
 
-// GET /api/tasks - Obtener tareas del usuario
-router.get('/', taskController.getTasks);
+// Helper para validar que la función existe antes de registrarla
+const safe = (handler) => {
+    if (typeof handler !== 'function') {
+        console.error("ERROR: Handler no es una función:", handler);
+        return (req, res) => res.status(500).json({ error: "Controller method not found" });
+    }
+    return handler;
+};
 
-// PUT /api/tasks/:id - Actualizar tarea (ruta plana)
-router.put('/:id', taskController.updateTask);
+// Rutas usando el helper 'safe'
+router.get('/', safe(taskController.getTasks));
+router.put('/:id', safe(taskController.updateTask));
+router.delete('/:id', safe(taskController.deleteTask));
 
-// DELETE /api/tasks/:id - Eliminar tarea (ruta plana)
-router.delete('/:id', taskController.deleteTask);
-
-// Rutas de comentarios (anidadas bajo la tarea)
-router.get('/:taskId/comments', commentController.getTaskComments);
-router.post('/:taskId/comments', commentController.createComment);
-router.put('/:taskId/comments/:commentId', commentController.updateComment);
-router.delete('/:taskId/comments/:commentId', commentController.deleteComment);
+// Rutas de comentarios
+router.get('/:taskId/comments', safe(commentController.getTaskComments));
+router.post('/:taskId/comments', safe(commentController.createComment));
+router.put('/:taskId/comments/:commentId', safe(commentController.updateComment));
+router.delete('/:taskId/comments/:commentId', safe(commentController.deleteComment));
 
 module.exports = router;

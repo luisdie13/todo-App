@@ -15,10 +15,13 @@ function Dashboard({ user, onLogout }) {
   const { authLoading } = useContext(AuthContext);
   const { toasts, showToast, dismissToast } = useToast();
 
-  // Gestión centralizada de vista
-  const [activeView, setActiveView] = useState('dashboard'); 
+  const [activeView, setActiveView] = useState('dashboard');
   const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  // Estado para el modal de nueva organización
+  const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
 
   const isSuperAdmin = user?.role === 'super_admin';
 
@@ -30,11 +33,24 @@ function Dashboard({ user, onLogout }) {
       const { created = [], memberOf = [] } = response.data;
       setOrganizations([...created, ...memberOf]);
     } catch (err) {
-      console.error('[Dashboard] Error:', err);
+      console.error('[Dashboard] Error fetching:', err);
     } finally {
       setLoading(false);
     }
   }, [user, activeView]);
+
+  const handleCreateOrganization = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/organizations', { name: newOrgName });
+      setShowCreateOrgModal(false);
+      setNewOrgName('');
+      showToast('Organization created successfully!', 'success');
+      loadOrganizations();
+    } catch (err) {
+      showToast('Failed to create organization', 'error');
+    }
+  };
 
   useEffect(() => {
     if (!authLoading && user && activeView === 'dashboard') loadOrganizations();
@@ -42,7 +58,6 @@ function Dashboard({ user, onLogout }) {
 
   return (
     <div className="dashboard">
-      {/* Navbar ahora recibe el control de navegación */}
       <Navbar 
         user={user} 
         onLogout={onLogout} 
@@ -51,10 +66,15 @@ function Dashboard({ user, onLogout }) {
       />
       
       <div className="container">
-        {/* Renderizado Condicional Exclusivo */}
         {activeView === 'dashboard' && (
           <div className="card">
-            <h2>✨ My Organizations</h2>
+            <div className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>✨ My Organizations</h2>
+              <button className="btn btn-primary" onClick={() => setShowCreateOrgModal(true)}>
+                ➕ New Organization
+              </button>
+            </div>
+            
             {loading ? <p>Loading...</p> : (
               <div className="org-list">
                 {organizations.map((org) => (
@@ -71,6 +91,26 @@ function Dashboard({ user, onLogout }) {
         {activeView === 'users' && isSuperAdmin && <UserManagementPanel />}
         {activeView === 'audit' && isSuperAdmin && <AuditLogsPanel />}
       </div>
+
+      {/* Modal de creación */}
+      {showCreateOrgModal && (
+        <div className="modal-overlay">
+          <form className="modal-content" onSubmit={handleCreateOrganization}>
+            <h3>Create New Organization</h3>
+            <input 
+              value={newOrgName} 
+              onChange={(e) => setNewOrgName(e.target.value)} 
+              placeholder="Organization Name" 
+              required 
+            />
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowCreateOrgModal(false)}>Cancel</button>
+              <button type="submit">Create</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
