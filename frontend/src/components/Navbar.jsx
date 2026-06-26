@@ -1,153 +1,87 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import '../styles/Navbar.css';
 
 /**
  * Navbar — sticky top navigation bar for SecureCollab.
- *
- * Conditional rendering rules:
- * - "🏠 Dashboard"      → always visible for authenticated users
- * - "👥 User Management" → ONLY rendered when user.role === 'super_admin'
- * - "🔐 Audit Logs"      → ONLY rendered when user.role === 'super_admin'
- *
- * Normal users (role: 'user') will NEVER see the admin-exclusive links.
- *
- * Props:
- * user              — authenticated user object ({ email, role, ... }) from memory store
- * onLogout          — callback: executes token clear + redirect to /login
- * onDashboardClick  — callback: resets layout when dashboard link is pressed
- * onAdminUsersClick — callback: updates active tab layout to user management panel
- * onAdminAuditClick — callback: updates active tab layout to audit logs panel
+ * Centraliza la navegación mediante el prop 'onNavigate'.
  */
-function Navbar({ user, onLogout, onDashboardClick, onAdminUsersClick, onAdminAuditClick }) {
+function Navbar({ user, onLogout, onNavigate, activeView }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
-
   const isSuperAdmin = user?.role === 'super_admin';
-
-  /** Returns true if the current path starts with the given prefix. */
-  const isActive = (path) =>
-    path === '/dashboard'
-      ? location.pathname === '/dashboard'
-      : location.pathname.startsWith(path);
 
   const closeMenu = () => setMenuOpen(false);
 
-  // ── Unified handlers to manage mobile menu toggle and context lifting ──
-  const handleDashboardAction = () => {
+  // Manejador unificado para cambios de vista
+  const handleNavigate = (view) => {
     closeMenu();
-    if (onDashboardClick) onDashboardClick();
-  };
-
-  const handleAdminUsersAction = () => {
-    closeMenu();
-    if (onAdminUsersClick) onAdminUsersClick();
-  };
-
-  const handleAdminAuditAction = () => {
-    closeMenu();
-    if (onAdminAuditClick) onAdminAuditClick();
+    if (onNavigate) onNavigate(view);
   };
 
   return (
     <nav className="navbar" role="navigation" aria-label="Main navigation">
-
-      {/* ── Brand ──────────────────────────────────────────────────────────── */}
+      {/* Brand */}
       <div className="navbar__brand">
-        <Link to="/dashboard" className="navbar__logo" onClick={handleDashboardAction}>
+        <Link to="/dashboard" className="navbar__logo" onClick={() => handleNavigate('dashboard')}>
           🔒 SecureCollab
         </Link>
       </div>
 
-      {/* ── Mobile hamburger toggle ─────────────────────────────────────────── */}
+      {/* Hamburger toggle */}
       <button
         className={`navbar__hamburger${menuOpen ? ' open' : ''}`}
         onClick={() => setMenuOpen((prev) => !prev)}
-        aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-        aria-expanded={menuOpen}
-        type="button"
+        aria-label="Toggle navigation menu"
       >
-        <span />
-        <span />
-        <span />
+        <span /><span /><span />
       </button>
 
-      {/* ── Navigation links ────────────────────────────────────────────────── */}
-      <ul
-        className={`navbar__links${menuOpen ? ' navbar__links--open' : ''}`}
-        role="list"
-      >
-        {/* Dashboard — visible to all authenticated users */}
-        <li role="listitem">
-          <Link
-            to="/dashboard"
-            className={`navbar__link${isActive('/dashboard') ? ' navbar__link--active' : ''}`}
-            onClick={handleDashboardAction}
-            aria-current={isActive('/dashboard') ? 'page' : undefined}
+      {/* Navigation links */}
+      <ul className={`navbar__links${menuOpen ? ' navbar__links--open' : ''}`}>
+        <li>
+          <button
+            className={`navbar__link ${activeView === 'dashboard' ? 'navbar__link--active' : ''}`}
+            onClick={() => handleNavigate('dashboard')}
           >
             🏠 Dashboard
-          </Link>
+          </button>
         </li>
 
-        {/* ── super_admin exclusive section ─────────────────────────────────── */}
         {isSuperAdmin && (
           <>
-            {/* Visual separator between regular and admin links */}
-            <li className="navbar__divider" role="separator" aria-hidden="true" />
-
-            {/* User Management — /admin/users */}
-            <li role="listitem">
-              <Link
-                to="/dashboard"
-                className={`navbar__link navbar__link--admin${
-                  isActive('/admin/users') ? ' navbar__link--active' : ''
-                }`}
-                onClick={handleAdminUsersAction}
-                aria-current={isActive('/admin/users') ? 'page' : undefined}
+            <li className="navbar__divider" />
+            <li>
+              <button
+                className={`navbar__link ${activeView === 'users' ? 'navbar__link--active' : ''}`}
+                onClick={() => handleNavigate('users')}
               >
                 👥 User Management
-              </Link>
+              </button>
             </li>
-
-            {/* Audit Logs — /admin/audit-logs */}
-            <li role="listitem">
-              <Link
-                to="/dashboard"
-                className={`navbar__link navbar__link--admin${
-                  isActive('/admin/audit-logs') ? ' navbar__link--active' : ''
-                }`}
-                onClick={handleAdminAuditAction}
-                aria-current={isActive('/admin/audit-logs') ? 'page' : undefined}
+            <li>
+              <button
+                className={`navbar__link ${activeView === 'audit' ? 'active' : ''}`}
+                onClick={() => handleNavigate('audit')}
               >
                 🔐 Audit Logs
-              </Link>
+              </button>
             </li>
           </>
         )}
       </ul>
 
-      {/* ── Right section: user identity + logout ──────────────────────────── */}
+      {/* User identity + logout */}
       <div className="navbar__right">
         {user && (
-          <span className="navbar__user" title={user.email}>
+          <span className="navbar__user">
             {user.email}
-            {isSuperAdmin && (
-              <span className="navbar__badge" aria-label="Super Administrator">
-                ⚡ Super Admin
-              </span>
-            )}
+            {isSuperAdmin && <span className="navbar__badge">⚡ Super Admin</span>}
           </span>
         )}
-        <button
-          className="navbar__logout"
-          onClick={onLogout}
-          type="button"
-          aria-label="Sign out of SecureCollab"
-        >
+        <button className="navbar__logout" onClick={onLogout}>
           🚪 Logout
         </button>
       </div>
-
     </nav>
   );
 }
